@@ -927,7 +927,8 @@ impl App {
                 continue;
             }
             self.update_card(index, |card| {
-                card.recording = true;
+                // Une source en échec peut être relancée par son bouton.
+                card.recording = status.state != SourceState::Failed;
                 card.busy = status.state == SourceState::Finishing;
                 let (state, tone) = match status.state {
                     SourceState::Connected => ("Enregistre", 1),

@@ -106,8 +106,9 @@ struct SourceRuntime {
 }
 
 impl SourceRuntime {
+    /// La source enregistre (ni arrêtée, ni en échec définitif).
     fn recording(&self) -> bool {
-        self.finisher.is_none() && !self.shared.is_done()
+        self.finisher.is_none() && !self.shared.is_done() && !self.shared.has_failed()
     }
 
     /// Demande l'arrêt et confie la finalisation à un fil séparé : rien ne
@@ -281,7 +282,9 @@ impl Session {
     fn launch(&mut self, source: &Source, origin_hns: u64, date: &str, time: &str) {
         let runtime = self.spawn_runtime(&source.id, &source.name, Capture::Window(source), origin_hns, date, time);
         if let Some(index) = self.sources.iter().position(|s| s.id == runtime.id) {
-            let previous = std::mem::replace(&mut self.sources[index], runtime);
+            let mut previous = std::mem::replace(&mut self.sources[index], runtime);
+            // Exécution précédente en échec : ses fils sont finalisés aussi.
+            previous.begin_stop(origin_hns);
             self.retired.push(previous);
         } else {
             self.sources.push(runtime);
