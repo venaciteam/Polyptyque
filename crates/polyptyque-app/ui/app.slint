@@ -183,7 +183,7 @@ component TopBar inherits HorizontalLayout {
         overflow: elide;
         min-width: 0;
     }
-    if Bridge.mic-enabled: MicPill {
+    if Bridge.mic-enabled || Bridge.mic-recording: MicPill {
         y: (parent.height - self.height) / 2;
     }
     if Bridge.converting: ConversionPill {

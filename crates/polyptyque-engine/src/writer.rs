@@ -71,6 +71,9 @@ pub(crate) struct WriterJob<T> {
     /// Les données antérieures à cette position sont sautées (recalage
     /// après une relance de l'encodeur).
     pub start_at: u64,
+    /// Octets écrits dans ce tube : le superviseur vérifie que chaque flux
+    /// avance.
+    pub progress: Arc<AtomicU64>,
     pub label: &'static str,
 }
 
@@ -79,7 +82,7 @@ pub(crate) fn spawn<T: Chunk>(
     shared: Arc<Shared>,
     control: Arc<PartControl>,
 ) -> io::Result<JoinHandle<()>> {
-    let WriterJob { thread_name, pipe, queue, position, start_at, label } = job;
+    let WriterJob { thread_name, pipe, queue, position, start_at, progress, label } = job;
     thread::Builder::new().name(thread_name).spawn(move || {
         let mut output = match pipe.connect() {
             Ok(output) => output,
@@ -106,6 +109,7 @@ pub(crate) fn spawn<T: Chunk>(
                         return;
                     }
                     shared.bytes_sent.fetch_add(data.len() as u64, Ordering::Relaxed);
+                    progress.fetch_add(data.len() as u64, Ordering::Relaxed);
                 }
                 // File vide : on continue, sauf si la capture a été abandonnée
                 // à l'arrêt (fil bloqué), auquel cas on ferme le flux.

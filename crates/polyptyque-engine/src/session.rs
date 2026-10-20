@@ -274,6 +274,17 @@ impl Session {
         self.sources.iter().any(|s| s.id == id && s.recording())
     }
 
+    /// Fichiers encore en cours d'écriture (micro compris).
+    pub fn files_in_progress(&self) -> Vec<PathBuf> {
+        self.sources
+            .iter()
+            .chain(self.retired.iter())
+            .chain(self.microphone.iter())
+            .filter(|s| !s.shared.is_done())
+            .flat_map(|s| s.shared.outputs())
+            .collect()
+    }
+
     /// Nombre de sources en train d'enregistrer.
     pub fn recording_count(&self) -> usize {
         self.sources.iter().filter(|s| s.recording()).count()

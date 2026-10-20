@@ -114,6 +114,9 @@ pub struct App {
     quitting: Cell<bool>,
     /// Sources en cours de préparation pour rejoindre l'enregistrement.
     joining: RefCell<HashSet<String>>,
+    /// Numéro de l'enregistrement en cours : une préparation commencée
+    /// pendant un enregistrement précédent est ignorée.
+    session_number: Cell<u64>,
     converter: RefCell<Option<Converter>>,
     conversion: RefCell<ConversionProgress>,
     /// Micros proposés dans les réglages : identifiant et nom.
@@ -177,6 +180,7 @@ pub fn run(platform: Arc<dyn Platform>, paths: Paths, initial: Option<Config>) -
         disk_check_running: Cell::new(false),
         quitting: Cell::new(false),
         joining: RefCell::new(HashSet::new()),
+        session_number: Cell::new(0),
         converter: RefCell::new(None),
         conversion: RefCell::new(ConversionProgress::default()),
         mic_choices: RefCell::new(Vec::new()),
@@ -406,7 +410,7 @@ impl App {
                 let Some(old) = previous.iter().find(|c| c.id == card.id) else {
                     return card;
                 };
-                if previews || old.recording {
+                if previews || (recording && old.recording) {
                     card.state = old.state.clone();
                     card.tone = old.tone;
                 }
@@ -749,8 +753,9 @@ impl App {
             self.start_recording(Some(id));
             return;
         };
-        if recording && count <= 1 {
-            // Dernière source : c'est la fin de l'enregistrement.
+        if recording && count + self.joining.borrow().len() <= 1 {
+            // Dernière source (et aucune en préparation) : c'est la fin de
+            // l'enregistrement.
             self.stop_recording(None);
         } else if recording {
             if let Some(session) = self.session.borrow_mut().as_mut() {
@@ -780,20 +785,25 @@ impl App {
             card.tone = 0;
         });
         let platform = self.platform.clone();
+        let number = self.session_number.get();
         thread::spawn(move || {
             let missing = catch_unwind(AssertUnwindSafe(|| {
                 resolve::prepare_windows(platform.as_ref(), std::slice::from_ref(&source), LAUNCH_WAIT, |_| {})
             }))
             .unwrap_or_default();
-            post(move |app| app.finish_join(source, missing));
+            post(move |app| app.finish_join(source, missing, number));
         });
     }
 
-    fn finish_join(&self, source: Source, missing: Vec<String>) {
+    fn finish_join(&self, source: Source, missing: Vec<String>, number: u64) {
+        if number != self.session_number.get() {
+            // Préparation commencée pendant un enregistrement terminé depuis :
+            // elle ne doit pas s'ajouter à un autre.
+            return;
+        }
         self.joining.borrow_mut().remove(&source.id);
         let result = match self.session.borrow_mut().as_mut() {
             Some(session) => session.add_source(&source).map(|_| true),
-            // Enregistrement arrêté entre-temps : rien à faire.
             None => Ok(false),
         };
         match result {
@@ -819,6 +829,11 @@ impl App {
             Err(e) => {
                 self.set_card(&source.id, |card| card.busy = false);
                 self.toast(&format!("Impossible d'ajouter « {} » : {e:#}", source.name), 3);
+                // Plus rien n'enregistre : l'enregistrement se termine.
+                let idle = self.session.borrow().as_ref().is_some_and(|s| s.recording_count() == 0);
+                if idle && self.joining.borrow().is_empty() {
+                    self.stop_recording(None);
+                }
             }
         }
     }
@@ -833,6 +848,9 @@ impl App {
         let Some(session) = self.session.borrow_mut().take() else {
             return;
         };
+        // Les sources en préparation n'ont plus d'enregistrement à rejoindre.
+        self.session_number.set(self.session_number.get() + 1);
+        self.joining.borrow_mut().clear();
         self.set_busy("Arrêt : finalisation des fichiers…");
         let handle = thread::spawn(move || {
             let (summaries, reason) = match catch_unwind(AssertUnwindSafe(move || session.stop())) {
@@ -913,12 +931,16 @@ impl App {
             else {
                 continue;
             };
+            if joining.contains(status.id.as_str()) {
+                // Source arrêtée qui rejoint l'enregistrement : « Préparation… ».
+                continue;
+            }
             if status.state == SourceState::Finished {
                 // Source arrêtée seule : la carte redevient un simple aperçu.
                 self.update_card(index, |card| {
                     if card.recording || card.busy {
                         card.recording = false;
-                        card.busy = joining.contains(card.id.as_str());
+                        card.busy = false;
                         card.state = "Fichier terminé".into();
                         card.tone = 0;
                         card.warning = SharedString::new();
@@ -995,11 +1017,29 @@ impl App {
 
     fn convert_files(&self) {
         let dir = self.config.borrow().settings.output_dir.clone();
-        let files = self.pick_mkv_files(&dir);
-        if !files.is_empty() {
-            let count = files.len();
+        let mut files = self.pick_mkv_files(&dir);
+        // Un fichier encore en cours d'écriture donnerait une copie tronquée.
+        let in_progress = self.session.borrow().as_ref().map(|s| s.files_in_progress()).unwrap_or_default();
+        let before = files.len();
+        files.retain(|f| !in_progress.iter().any(|p| same_file(p, f)));
+        let skipped = before - files.len();
+        let count = files.len();
+        if count > 0 {
             self.enqueue_conversions(files);
-            self.toast(&format!("{count} fichier(s) ajouté(s) à la conversion MP4."), 1);
+        }
+        match (count, skipped) {
+            (0, 0) => {}
+            (0, _) => self.toast(
+                "Ces fichiers sont en cours d'enregistrement : convertis-les une fois l'enregistrement arrêté.",
+                2,
+            ),
+            (_, 0) => self.toast(&format!("{count} fichier(s) ajouté(s) à la conversion MP4."), 1),
+            (_, _) => self.toast(
+                &format!(
+                    "{count} fichier(s) ajouté(s) à la conversion MP4 ; {skipped} en cours d'enregistrement ignoré(s)."
+                ),
+                2,
+            ),
         }
     }
 
@@ -1894,6 +1934,14 @@ fn prepare(platform: &dyn Platform, config: &Config, scene: &Scene) -> Result<Pr
         }
     });
     Ok(Prepared { ffmpeg, encoder, missing })
+}
+
+/// Même fichier, quelle que soit l'écriture du chemin (majuscules, `..`).
+fn same_file(a: &std::path::Path, b: &std::path::Path) -> bool {
+    match (fs::canonicalize(a), fs::canonicalize(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a == b,
+    }
 }
 
 /// Texte de la pastille de conversion : « MP4 · 2 sur 3 · 45 % ».

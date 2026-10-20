@@ -11,7 +11,7 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -120,15 +120,15 @@ impl OutputTask {
                 Ok(running) => running.supervise(&shared, &plan.log),
                 Err(e) => PartEnd::Crashed(format!("démarrage de l'encodeur impossible : {e:#}")),
             };
-            let reason = match end {
-                PartEnd::Closed => return,
-                PartEnd::Crashed(reason) => reason,
-            };
             if !output.exists() || std::fs::metadata(&output).is_ok_and(|m| m.len() == 0) {
                 // Rien d'écrit : on ne garde pas de fichier vide.
                 let _ = std::fs::remove_file(&output);
                 shared.remove_output(&output);
             }
+            let reason = match end {
+                PartEnd::Closed => return,
+                PartEnd::Crashed(reason) => reason,
+            };
             if stopping(&shared) {
                 log::warn!("[{}] encodeur arrêté pendant la finalisation : {reason}", plan.title);
                 return;
@@ -170,8 +170,37 @@ struct Streams<'a> {
 /// Une partie de fichier en cours : FFmpeg et ses fils d'écriture.
 struct Part {
     child: Child,
-    writers: Vec<(JoinHandle<()>, String)>,
+    writers: Vec<WriterThread>,
     control: Arc<PartControl>,
+}
+
+/// Fil d'écriture d'un flux, et suivi de son avancement.
+struct WriterThread {
+    handle: JoinHandle<()>,
+    pipe_path: String,
+    progress: Arc<AtomicU64>,
+    last_bytes: u64,
+    last_progress: Instant,
+}
+
+impl WriterThread {
+    fn new(handle: JoinHandle<()>, pipe_path: String, progress: Arc<AtomicU64>) -> Self {
+        Self { handle, pipe_path, progress, last_bytes: 0, last_progress: Instant::now() }
+    }
+
+    /// Vrai si ce flux n'a rien transmis depuis `timeout` alors que son fil
+    /// tourne encore. Les deux flux sont continus (images répétées, silence
+    /// ajouté) : un flux immobile signale un encodeur bloqué, même si
+    /// l'autre flux passe encore.
+    fn stalled(&mut self, timeout: Duration) -> bool {
+        let bytes = self.progress.load(Ordering::Relaxed);
+        if bytes != self.last_bytes {
+            self.last_bytes = bytes;
+            self.last_progress = Instant::now();
+            return false;
+        }
+        !self.handle.is_finished() && self.last_progress.elapsed() >= timeout
+    }
 }
 
 impl Part {
@@ -239,25 +268,31 @@ impl Part {
         let mut running = Part { child, writers: Vec::new(), control: Arc::new(PartControl::default()) };
         let spawn_all = || -> std::io::Result<()> {
             if let Some((pipe, path, queue)) = video {
+                let progress = Arc::new(AtomicU64::new(0));
                 let job = WriterJob {
                     thread_name: format!("{}-video-pipe", plan.title),
                     pipe,
                     queue: queue.clone(),
                     position: shared.video_position.clone(),
                     start_at: streams.video_start,
+                    progress: progress.clone(),
                     label: "image",
                 };
-                running.writers.push((writer::spawn(job, shared.clone(), running.control.clone())?, path));
+                let handle = writer::spawn(job, shared.clone(), running.control.clone())?;
+                running.writers.push(WriterThread::new(handle, path, progress));
             }
+            let progress = Arc::new(AtomicU64::new(0));
             let job = WriterJob {
                 thread_name: format!("{}-audio-pipe", plan.title),
                 pipe: audio_pipe,
                 queue: streams.audio.clone(),
                 position: shared.audio_position.clone(),
                 start_at: streams.audio_start,
+                progress: progress.clone(),
                 label: "son",
             };
-            running.writers.push((writer::spawn(job, shared.clone(), running.control.clone())?, audio_path));
+            let handle = writer::spawn(job, shared.clone(), running.control.clone())?;
+            running.writers.push(WriterThread::new(handle, audio_path, progress));
             Ok(())
         };
         if let Err(e) = spawn_all() {
@@ -272,11 +307,9 @@ impl Part {
     /// Veille sur la partie jusqu'à la fermeture normale du fichier ou
     /// l'arrêt de l'encodeur.
     fn supervise(mut self, shared: &Shared, log: &Path) -> PartEnd {
-        let mut last_bytes = shared.bytes_sent.load(Ordering::Relaxed);
-        let mut last_progress = Instant::now();
         let mut stalled = false;
         loop {
-            let writers_done = self.writers.iter().all(|(handle, _)| handle.is_finished());
+            let writers_done = self.writers.iter().all(|w| w.handle.is_finished());
             if writers_done {
                 self.join_writers();
                 if self.control.broken.load(Ordering::SeqCst) && !stopping(shared) {
@@ -310,12 +343,17 @@ impl Part {
                 stalled = true;
                 let _ = self.child.kill();
             }
-            let bytes = shared.bytes_sent.load(Ordering::Relaxed);
-            if bytes != last_bytes {
-                last_bytes = bytes;
-                last_progress = Instant::now();
-            } else if !stalled && last_progress.elapsed() >= STALL_TIMEOUT {
-                log::warn!("l'encodeur n'avance plus depuis {} s : arrêt forcé", STALL_TIMEOUT.as_secs());
+            let frozen: Vec<&str> = self
+                .writers
+                .iter_mut()
+                .filter_map(|w| w.stalled(STALL_TIMEOUT).then_some(w.pipe_path.as_str()))
+                .collect();
+            if !stalled && !frozen.is_empty() {
+                log::warn!(
+                    "l'encodeur ne lit plus {} depuis {} s : arrêt forcé",
+                    frozen.join(", "),
+                    STALL_TIMEOUT.as_secs()
+                );
                 stalled = true;
                 let _ = self.child.kill();
             }
@@ -329,12 +367,12 @@ impl Part {
     fn abandon_writers(&mut self) {
         self.control.cancel.store(true, Ordering::SeqCst);
         let grace = Instant::now() + Duration::from_millis(800);
-        while Instant::now() < grace && !self.writers.iter().all(|(handle, _)| handle.is_finished()) {
+        while Instant::now() < grace && !self.writers.iter().all(|w| w.handle.is_finished()) {
             thread::sleep(Duration::from_millis(20));
         }
-        for (handle, pipe_path) in &self.writers {
-            if !handle.is_finished() {
-                let path = pipe_path.clone();
+        for writer in &self.writers {
+            if !writer.handle.is_finished() {
+                let path = writer.pipe_path.clone();
                 // Dans un fil à part : cette ouverture ne doit jamais bloquer
                 // le superviseur.
                 let _ = thread::Builder::new().name("deblocage-tube".into()).spawn(move || {
@@ -346,8 +384,8 @@ impl Part {
     }
 
     fn join_writers(&mut self) {
-        for (handle, _) in self.writers.drain(..) {
-            let _ = handle.join();
+        for writer in self.writers.drain(..) {
+            let _ = writer.handle.join();
         }
     }
 }

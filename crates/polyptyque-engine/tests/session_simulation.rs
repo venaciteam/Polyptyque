@@ -283,10 +283,16 @@ fn check_parts(name: &str, outputs: &[PathBuf]) -> f64 {
     total
 }
 
+/// Motif `pkill -f` qui désigne littéralement `text`.
+fn regex_escape(text: &str) -> String {
+    text.chars().flat_map(|c| if "\\.^$|?*+()[]{}".contains(c) { vec!['\\', c] } else { vec![c] }).collect()
+}
+
 #[test]
 fn crashed_encoder_resumes_in_a_new_part() {
-    if !ffmpeg_available() {
-        eprintln!("FFmpeg absent : test ignoré");
+    let pkill = Command::new("pkill").arg("--version").output().is_ok_and(|o| o.status.success());
+    if !ffmpeg_available() || !pkill {
+        eprintln!("FFmpeg ou pkill absent : test ignoré");
         return;
     }
     let Sim { root, platform } = sim();
@@ -294,7 +300,7 @@ fn crashed_encoder_resumes_in_a_new_part() {
     let mut session = Session::start(platform, plan).expect("démarrage");
     thread::sleep(Duration::from_secs(3));
     // Plantage brutal du FFmpeg de la première source.
-    let pattern = format!("{}/.*-0-p1-video", root.join("tubes").display());
+    let pattern = format!("{}/.*-0-p1-video", regex_escape(&root.join("tubes").display().to_string()));
     let killed = Command::new("pkill").args(["-KILL", "-f", &pattern]).status().unwrap();
     assert!(killed.success(), "FFmpeg de la première source introuvable");
     thread::sleep(Duration::from_secs(4));
@@ -314,6 +320,39 @@ fn crashed_encoder_resumes_in_a_new_part() {
     let witness = &summaries[1];
     assert_eq!(witness.outputs.len(), 1);
     assert!((check_parts(&witness.name, &witness.outputs) - elapsed).abs() < 0.25);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn frozen_encoder_is_detected_and_replaced() {
+    let pkill = Command::new("pkill").arg("--version").output().is_ok_and(|o| o.status.success());
+    if !ffmpeg_available() || !pkill {
+        eprintln!("FFmpeg ou pkill absent : test ignoré");
+        return;
+    }
+    let Sim { root, platform } = sim();
+    let mut session =
+        Session::start(platform, plan(&root, vec![application("Figée", "immediate")])).expect("démarrage");
+    thread::sleep(Duration::from_secs(3));
+    // FFmpeg suspendu : il ne lit plus ses tubes, sans pour autant s'arrêter.
+    let pattern = format!("{}/.*-0-p1-video", regex_escape(&root.join("tubes").display().to_string()));
+    let frozen = Command::new("pkill").args(["-STOP", "-f", &pattern]).status().unwrap();
+    assert!(frozen.success(), "FFmpeg introuvable");
+    let deadline = Instant::now() + Duration::from_secs(45);
+    while session.status()[0].part < 2 {
+        assert!(Instant::now() < deadline, "encodeur figé non détecté : {:?}", session.status()[0]);
+        thread::sleep(Duration::from_millis(250));
+    }
+    thread::sleep(Duration::from_secs(2));
+    assert_eq!(session.status()[0].state, SourceState::Connected);
+    let elapsed = session.elapsed().as_secs_f64();
+    let summaries = session.stop();
+    let outputs = &summaries[0].outputs;
+    assert_eq!(outputs.len(), 2, "{outputs:?}");
+    // Rien de ce qui attendait pendant le blocage n'est perdu, hormis ce
+    // que FFmpeg gardait en mémoire.
+    let total = check_parts("Figée", outputs);
+    assert!(total > elapsed - 2.0 && total <= elapsed + 0.25, "{total} s pour {elapsed} s");
     fs::remove_dir_all(root).unwrap();
 }
 

@@ -12,8 +12,9 @@ use anyhow::{Context, Result};
 use windows::core::HSTRING;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::Shutdown::{ShutdownBlockReasonCreate, ShutdownBlockReasonDestroy};
-use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
-use windows::Win32::UI::WindowsAndMessaging::{WM_ENDSESSION, WM_QUERYENDSESSION};
+use windows::Win32::System::Threading::SetProcessShutdownParameters;
+use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
+use windows::Win32::UI::WindowsAndMessaging::{WM_ENDSESSION, WM_NCDESTROY, WM_QUERYENDSESSION};
 
 use crate::windows_list::hwnd;
 
@@ -21,6 +22,9 @@ use crate::windows_list::hwnd;
 const SUBCLASS_ID: usize = 0x5059_5054; // « PYPT »
 /// Arrêt critique (batterie épuisée…) : il ne peut pas être bloqué.
 const ENDSESSION_CRITICAL: u32 = 0x4000_0000;
+/// Plus haut niveau réservé aux applications : prévenu avant les processus
+/// de niveau ordinaire (0x280), dont les FFmpeg lancés par Polyptyque.
+const SHUTDOWN_LEVEL_FIRST: u32 = 0x3FF;
 
 pub enum SessionEnd {
     /// Windows demande s'il peut fermer la session. Le gestionnaire répond
@@ -40,6 +44,11 @@ thread_local! {
 /// À appeler sur le fil qui a créé la fenêtre (celui de l'interface).
 pub fn watch(window: isize, handler: impl Fn(SessionEnd) -> bool + 'static) -> Result<()> {
     HANDLER.with(|h| *h.borrow_mut() = Some(Box::new(handler)));
+    // Polyptyque doit être prévenu avant ses encodeurs : s'ils étaient
+    // fermés d'abord, leurs fichiers seraient coupés avant la finalisation.
+    if let Err(e) = unsafe { SetProcessShutdownParameters(SHUTDOWN_LEVEL_FIRST, 0) } {
+        log::warn!("ordre de fermeture non modifiable : {e}");
+    }
     unsafe { SetWindowSubclass(hwnd(window), Some(window_proc), SUBCLASS_ID, 0) }
         .ok()
         .context("surveillance de la fermeture de session")
@@ -84,6 +93,9 @@ unsafe extern "system" fn window_proc(
             log::warn!("fermeture de session : finalisation des fichiers");
             notify(SessionEnd::Ending);
             return LRESULT(0);
+        }
+        WM_NCDESTROY => {
+            let _ = unsafe { RemoveWindowSubclass(window, Some(window_proc), SUBCLASS_ID) };
         }
         _ => {}
     }
