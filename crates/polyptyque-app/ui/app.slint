@@ -129,6 +129,13 @@ component PreviewGrid inherits Rectangle {
     property <length> offset-x: (self.width - columns * cell-width - (columns - 1) * spacing) / 2;
     property <length> offset-y: (self.height - rows * cell-height - (rows - 1) * spacing) / 2;
 
+    init => {
+        Bridge.card-width = self.cell-width;
+    }
+    changed cell-width => {
+        Bridge.card-width = self.cell-width;
+    }
+
     if count == 0: Rectangle {
         border-radius: Theme.radius;
         border-width: 1px;

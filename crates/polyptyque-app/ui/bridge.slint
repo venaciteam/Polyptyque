@@ -58,6 +58,9 @@ export global Bridge {
     in property <string> scene-name;
     in property <[SourceItem]> sources;
     in property <[SourceCard]> cards;
+    // Largeur d'une carte d'aperçu à l'écran (sert à choisir la définition
+    // des aperçus).
+    in-out property <length> card-width;
     in-out property <int> selected-source: -1;
 
     // Feuille ouverte : "", "browser", "application", "settings",

@@ -30,7 +30,7 @@ use polyptyque_engine::{probe, Session, SessionPlan, SourceState, SourceStatus, 
 use slint::{CloseRequestResponse, ComponentHandle, Image, Model, ModelRc, SharedString, Timer, TimerMode, VecModel};
 
 use crate::format;
-use crate::preview::{PreviewManager, PreviewState};
+use crate::preview::{self, PreviewManager, PreviewState};
 use crate::{AppWindow, Bridge, SceneItem, SourceCard, SourceItem, WindowItem};
 
 const LAUNCH_WAIT: Duration = Duration::from_secs(30);
@@ -77,6 +77,10 @@ pub struct App {
     session: RefCell<Option<Session>>,
     busy: Cell<bool>,
     previews: RefCell<PreviewManager>,
+    /// Définition actuelle des aperçus, et celle qui attend d'être confirmée
+    /// (avec le nombre de mesures concordantes).
+    preview_size: Cell<(u32, u32)>,
+    pending_preview_size: Cell<Option<((u32, u32), u32)>>,
     cards: Rc<VecModel<SourceCard>>,
     browsers: RefCell<Vec<BrowserInstall>>,
     windows: RefCell<Vec<WindowInfo>>,
@@ -129,6 +133,8 @@ pub fn run(platform: Arc<dyn Platform>, paths: Paths, initial: Option<Config>) -
         session: RefCell::new(None),
         busy: Cell::new(false),
         previews: RefCell::new(PreviewManager::default()),
+        preview_size: Cell::new(preview::default_size()),
+        pending_preview_size: Cell::new(None),
         cards: Rc::new(VecModel::default()),
         browsers: RefCell::new(Vec::new()),
         windows: RefCell::new(Vec::new()),
@@ -454,8 +460,35 @@ impl App {
         let mut previews = self.previews.borrow_mut();
         previews.stop();
         if config.settings.previews {
-            *previews = PreviewManager::start(&self.platform, &config.active_scene().sources);
+            *previews = PreviewManager::start(&self.platform, &config.active_scene().sources, self.preview_size.get());
         }
+    }
+
+    /// Adapte la définition des aperçus à la taille des cartes. Un
+    /// changement n'est appliqué qu'après deux mesures identiques (une
+    /// seconde), pour ne pas recréer les captures pendant un redimensionnement.
+    fn update_preview_size(&self) {
+        let Some(ui) = self.ui.upgrade() else {
+            return;
+        };
+        let card_width = ui.global::<Bridge>().get_card_width() * ui.window().scale_factor();
+        let wanted = preview::size_for_card(card_width);
+        if wanted == self.preview_size.get() {
+            self.pending_preview_size.set(None);
+            return;
+        }
+        let seen = match self.pending_preview_size.get() {
+            Some((size, count)) if size == wanted => count + 1,
+            _ => 1,
+        };
+        if seen < 2 {
+            self.pending_preview_size.set(Some((wanted, seen)));
+            return;
+        }
+        self.pending_preview_size.set(None);
+        self.preview_size.set(wanted);
+        log::info!("définition des aperçus : {}x{}", wanted.0, wanted.1);
+        self.previews.borrow().set_size(wanted);
     }
 
     fn tick_previews(&self) {
@@ -645,6 +678,7 @@ impl App {
     }
 
     fn tick_status(&self) {
+        self.update_preview_size();
         let statuses: Vec<SourceStatus> = {
             let mut session = self.session.borrow_mut();
             let Some(session) = session.as_mut() else {
