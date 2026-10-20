@@ -347,8 +347,13 @@ Solution retenue : **[[Velopack]]** (outil d'installation et de mise à jour éc
 | Fichier livré | Un seul `Setup.exe` |
 | Questions posées | Aucune : installation dans le dossier de l'utilisateur, puis lancement de Polyptyque |
 | Droits administrateur | Non requis (pas d'alerte UAC) |
-| Apparence | Image d'accueil personnalisable (fixe ou animée) pendant l'installation ; pas de thème de couleurs |
-| Mises à jour | Automatiques, depuis les publications GitHub |
+| Apparence | Animation d'accueil : les trois panneaux du logo s'allument tour à tour (`assets/logo/installation.gif`) |
+| Raccourcis | Bureau et menu Démarrer |
+| Dossier d'installation | `%LOCALAPPDATA%\PolyptyqueApp`, distinct des données (`%APPDATA%\Polyptyque`, `%LOCALAPPDATA%\Polyptyque`) : une désinstallation efface tout le dossier d'installation mais conserve scènes, réglages, profils de navigateur (connexions) et journaux |
+| Système minimal | Windows 10 version 2004 ; refus avec explication en dessous |
+| Version portable | `Polyptyque-portable.zip`, sans installation |
+| Mises à jour | Recherche au démarrage puis toutes les 6 h (désactivable) ; proposées d'un clic, téléchargées avec avancement, puis redémarrage ; jamais pendant un enregistrement ou une conversion (sinon installées au prochain démarrage). Source : publications GitHub du dépôt (fonctionne une fois le dépôt public) |
+| Publication | Étiquette `vX.Y.Z` (identique à la version de `Cargo.toml`) : la fabrication publie la version GitHub, avec mise à jour partielle depuis la précédente |
 | Surcoût | Environ 7,5 Mo pour l'installateur, 5 Mo pour l'outil de mise à jour |
 | macOS / Linux | Paquet `.pkg` sous macOS (fabriqué sur un Mac), AppImage auto-mise à jour sous Linux |
 
@@ -398,7 +403,7 @@ Solution retenue : **[[Velopack]]** (outil d'installation et de mise à jour éc
 
 - Les profils de navigateur contiennent des **sessions connectées** : stockés uniquement en local, jamais transmis.
 - Microphone désactivé par défaut, activation explicite.
-- Aucune donnée envoyée sur Internet par Polyptyque (proposition, voir [[#Questions ouvertes]]).
+- Aucune donnée envoyée sur Internet par Polyptyque (proposition, voir [[#Questions ouvertes]]). Seule exception : la recherche de mises à jour interroge GitHub (adresse IP visible de GitHub, rien d'autre), désactivable dans les réglages.
 
 ### Distribution et licence
 
@@ -523,8 +528,12 @@ Seule une implémentation de `Platform` est à écrire pour chaque système (`po
 > - [x] Mode démonstration hors Windows (fausses fenêtres) pour développer et vérifier l'interface
 > - [ ] Validation sur la machine de référence
 
-> [!todo] Étape 3 - Installateur ([[Velopack]])
-> - [ ] `Setup.exe` unique avec image d'accueil, mises à jour automatiques
+> [!todo] Étape 3 - Installateur ([[Velopack]]), écrite le 2026-10-20
+> - [x] Logo et icône (variante « carré coloré »), intégrés aux exécutables
+> - [x] `Setup.exe` unique avec animation d'accueil, version portable
+> - [x] Mises à jour proposées depuis les publications GitHub
+> - [x] README complet
+> - [ ] Validation sur la machine de référence
 
 > [!todo] Étape 4 - Publication
 > - [ ] Dépôt public, première version publiée
@@ -572,6 +581,9 @@ Seule une implémentation de `Platform` est à écrire pour chaque système (`po
 | 2026-10-20 | Micro : fichier `.mka` pendant l'enregistrement, `.m4a` après conversion |
 | 2026-10-20 | Enregistrement individuel : une source ajoutée en cours de route commence un nouveau fichier ; arrêter la dernière source termine l'enregistrement |
 | 2026-10-20 | Arrêt de Windows pendant un enregistrement : blocage avec explication, sinon finalisation des fichiers |
+| 2026-10-20 | Logo : trois panneaux sur un carré arrondi en dégradé (variante C) |
+| 2026-10-20 | Installation dans `%LOCALAPPDATA%\PolyptyqueApp`, séparée des données, conservées à la désinstallation |
+| 2026-10-20 | Mises à jour détectées et proposées d'un clic, jamais pendant un enregistrement ; dépôt rendu public quand tout sera prêt |
 
 ---
 

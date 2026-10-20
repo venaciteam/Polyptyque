@@ -4,6 +4,14 @@ POLYPTYQUE - VERSION D'ESSAI
 Polyptyque enregistre plusieurs fenêtres en même temps, chacune dans son
 propre fichier, avec uniquement le son de cette fenêtre.
 
+Installation
+------------
+Polyptyque-Setup.exe installe Polyptyque sans question ni droits
+administrateur (raccourcis sur le Bureau et dans le menu Démarrer). Les
+nouvelles versions sont proposées d'un clic dans Polyptyque. La
+désinstallation (Paramètres de Windows > Applications) conserve scènes,
+réglages et connexions des navigateurs.
+
 Contenu
 -------
 - polyptyque.exe         : Polyptyque, avec son interface
