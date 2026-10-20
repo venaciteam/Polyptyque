@@ -1,0 +1,14 @@
+[package]
+name = "polyptyque-core"
+description = "Cœur de Polyptyque : modèle de données, nommage, synchronisation, commandes FFmpeg"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+directories.workspace = true
+serde.workspace = true
+toml.workspace = true

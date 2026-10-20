@@ -1,0 +1,193 @@
+//! État partagé entre les fils d'une source et l'interface.
+
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering};
+use std::sync::{Mutex, MutexGuard};
+
+use polyptyque_core::platform::WindowInfo;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceState {
+    /// Fenêtre pas encore trouvée : l'image est noire.
+    Searching,
+    Connected,
+    /// Fenêtre réduite : l'image est figée.
+    Minimized,
+    /// Fenêtre disparue : image noire jusqu'à son retour.
+    Lost,
+    /// Encodeur arrêté : la source n'enregistre plus.
+    Failed,
+    Finished,
+}
+
+impl SourceState {
+    pub fn label(self) -> &'static str {
+        match self {
+            SourceState::Searching => "Recherche",
+            SourceState::Connected => "Connectée",
+            SourceState::Minimized => "Réduite",
+            SourceState::Lost => "Perdue",
+            SourceState::Failed => "ERREUR",
+            SourceState::Finished => "Terminée",
+        }
+    }
+
+    fn from_u8(value: u8) -> Self {
+        match value {
+            1 => SourceState::Connected,
+            2 => SourceState::Minimized,
+            3 => SourceState::Lost,
+            4 => SourceState::Failed,
+            5 => SourceState::Finished,
+            _ => SourceState::Searching,
+        }
+    }
+
+    fn to_u8(self) -> u8 {
+        match self {
+            SourceState::Searching => 0,
+            SourceState::Connected => 1,
+            SourceState::Minimized => 2,
+            SourceState::Lost => 3,
+            SourceState::Failed => 4,
+            SourceState::Finished => 5,
+        }
+    }
+}
+
+pub(crate) struct Shared {
+    state: AtomicU8,
+    pub frames_total: AtomicU64,
+    pub frames_new: AtomicU64,
+    pub frames_dropped: AtomicU64,
+    pub audio_last_sound_hns: AtomicU64,
+    audio_peak_bits: AtomicU32,
+    target: Mutex<Option<WindowInfo>>,
+    target_generation: AtomicU64,
+    failed: AtomicBool,
+    error: Mutex<Option<String>>,
+    stop_at_hns: AtomicU64,
+}
+
+impl Shared {
+    pub fn new() -> Self {
+        Self {
+            state: AtomicU8::new(SourceState::Searching.to_u8()),
+            frames_total: AtomicU64::new(0),
+            frames_new: AtomicU64::new(0),
+            frames_dropped: AtomicU64::new(0),
+            audio_last_sound_hns: AtomicU64::new(0),
+            audio_peak_bits: AtomicU32::new(0),
+            target: Mutex::new(None),
+            target_generation: AtomicU64::new(0),
+            failed: AtomicBool::new(false),
+            error: Mutex::new(None),
+            stop_at_hns: AtomicU64::new(0),
+        }
+    }
+
+    pub fn state(&self) -> SourceState {
+        SourceState::from_u8(self.state.load(Ordering::Relaxed))
+    }
+
+    /// Un échec est définitif : il n'est jamais remplacé par un autre état.
+    pub fn set_state(&self, state: SourceState) {
+        if !self.has_failed() {
+            self.state.store(state.to_u8(), Ordering::Relaxed);
+        }
+    }
+
+    pub fn set_target(&self, target: Option<WindowInfo>) {
+        *lock(&self.target) = target;
+        self.target_generation.fetch_add(1, Ordering::SeqCst);
+    }
+
+    pub fn target_pid(&self) -> Option<u32> {
+        lock(&self.target).as_ref().map(|w| w.pid)
+    }
+
+    pub fn target_generation(&self) -> u64 {
+        self.target_generation.load(Ordering::SeqCst)
+    }
+
+    pub fn fail(&self, message: String) {
+        log::error!("{message}");
+        let mut error = lock(&self.error);
+        if !self.failed.swap(true, Ordering::SeqCst) {
+            *error = Some(message);
+        }
+        self.state.store(SourceState::Failed.to_u8(), Ordering::Relaxed);
+    }
+
+    pub fn has_failed(&self) -> bool {
+        self.failed.load(Ordering::SeqCst)
+    }
+
+    /// Problème non bloquant, affiché à l'utilisateur.
+    pub fn note_error(&self, message: String) {
+        if !self.has_failed() {
+            *lock(&self.error) = Some(message);
+        }
+    }
+
+    pub fn clear_note(&self) {
+        if !self.has_failed() {
+            *lock(&self.error) = None;
+        }
+    }
+
+    pub fn error(&self) -> Option<String> {
+        lock(&self.error).clone()
+    }
+
+    pub fn request_stop(&self, at_hns: u64) {
+        self.stop_at_hns.store(at_hns.max(1), Ordering::SeqCst);
+    }
+
+    pub fn stop_at(&self) -> Option<u64> {
+        match self.stop_at_hns.load(Ordering::SeqCst) {
+            0 => None,
+            at => Some(at),
+        }
+    }
+
+    /// Les nombres flottants positifs se comparent comme leurs bits.
+    pub fn record_peak(&self, peak: f32) {
+        if peak.is_finite() && peak > 0.0 {
+            self.audio_peak_bits.fetch_max(peak.to_bits(), Ordering::Relaxed);
+        }
+    }
+
+    pub fn take_peak(&self) -> f32 {
+        f32::from_bits(self.audio_peak_bits.swap(0, Ordering::Relaxed))
+    }
+}
+
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn failure_is_sticky() {
+        let shared = Shared::new();
+        shared.set_state(SourceState::Connected);
+        shared.fail("premier".into());
+        shared.fail("second".into());
+        shared.set_state(SourceState::Connected);
+        assert_eq!(shared.state(), SourceState::Failed);
+        assert_eq!(shared.error().as_deref(), Some("premier"));
+    }
+
+    #[test]
+    fn peak_is_taken_once() {
+        let shared = Shared::new();
+        shared.record_peak(0.2);
+        shared.record_peak(0.7);
+        shared.record_peak(0.4);
+        assert_eq!(shared.take_peak(), 0.7);
+        assert_eq!(shared.take_peak(), 0.0);
+    }
+}

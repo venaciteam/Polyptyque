@@ -1,0 +1,16 @@
+//! Cœur de Polyptyque.
+//!
+//! Tout ce qui ne dépend pas du système d'exploitation : modèle de données
+//! (scènes, sources, réglages), nommage des fichiers, calculs de
+//! synchronisation et construction des commandes FFmpeg. Les parties propres
+//! à un système (capture, fenêtres, tubes) sont décrites par le trait
+//! [`platform::Platform`] et implémentées ailleurs.
+
+pub mod browsers;
+pub mod config;
+pub mod encoder;
+pub mod naming;
+pub mod paths;
+pub mod platform;
+pub mod timeline;
+pub mod video;

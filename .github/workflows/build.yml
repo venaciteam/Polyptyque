@@ -1,0 +1,70 @@
+name: Vérifications et fabrication
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  # FFmpeg 8.1 : en-têtes NVIDIA SDK 13.0, compatibles avec les pilotes 570+.
+  # Les versions 9.x exigent des pilotes 610+.
+  FFMPEG_ZIP: ffmpeg-n8.1-latest-win64-gpl-8.1
+  FFMPEG_URL: https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-win64-gpl-8.1.zip
+
+jobs:
+  tests:
+    name: Tests (Linux, simulation complète avec FFmpeg)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Outils
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q ffmpeg
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
+      - name: Mise en forme
+        run: cargo fmt --all -- --check
+      - name: Analyse
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Tests
+        run: cargo test --workspace
+
+  windows:
+    name: Fabrication Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Outils
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy
+          rustup default stable
+      - name: Analyse
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Tests
+        run: cargo test --workspace
+      - name: Compilation
+        run: cargo build --release -p polyptyque-cli
+      - name: Téléchargement de FFmpeg
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri $env:FFMPEG_URL -OutFile ffmpeg.zip
+          Expand-Archive ffmpeg.zip -DestinationPath ffmpeg
+      - name: Assemblage
+        shell: pwsh
+        run: |
+          $dist = "dist/Polyptyque"
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
+          Copy-Item target/release/polyptyque.exe $dist/
+          Copy-Item "ffmpeg/$env:FFMPEG_ZIP/bin/ffmpeg.exe" $dist/
+          Copy-Item "ffmpeg/$env:FFMPEG_ZIP/LICENSE.txt" "$dist/FFMPEG-LICENSE.txt"
+          Copy-Item LICENSE "$dist/LICENSE.txt"
+          Copy-Item packaging/LISEZMOI.txt $dist/
+          & "$dist/ffmpeg.exe" -hide_banner -version | Select-Object -First 1
+          & "$dist/ffmpeg.exe" -hide_banner -encoders | Select-String -Pattern "nvenc|amf|qsv|libx264"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Polyptyque-prototype-windows
+          path: dist/
+          retention-days: 30
