@@ -101,7 +101,7 @@ pub fn run(platform: &Arc<dyn Platform>, config: &Config) -> Result<()> {
         video.fps,
         ui::thousands(video.bitrate_kbps as u64)
     );
-    let session = monitor(session, &header);
+    let session = monitor(session, &header, &scene.sources);
 
     println!("\nArrêt en cours : les fichiers sont finalisés…");
     let summaries = session.stop();
@@ -170,8 +170,8 @@ fn prepare_windows(platform: &dyn Platform, sources: &[Source]) -> Vec<String> {
 }
 
 /// Affichage en direct jusqu'à la demande d'arrêt (Q, Échap, Ctrl+C ou
-/// disque presque plein).
-fn monitor(mut session: Session, header: &str) -> Session {
+/// disque presque plein). R rouvre les sources perdues.
+fn monitor(mut session: Session, header: &str, sources: &[Source]) -> Session {
     let term = Term::stdout();
     let _ = term.clear_screen();
     let mut drawn = 0usize;
@@ -179,9 +179,19 @@ fn monitor(mut session: Session, header: &str) -> Session {
     let mut free = session.free_space();
     let mut last_disk_check = Instant::now();
     let mut disk_full = false;
+    let mut states: Vec<SourceState> = Vec::new();
+    let mut notice: Option<String> = None;
 
     loop {
-        if keys::stop_requested() || STOP_REQUESTED.load(Ordering::SeqCst) {
+        match keys::poll() {
+            Some(keys::Key::Stop) => break,
+            Some(keys::Key::Relaunch) => {
+                notice = Some(relaunch_lost(sources, &states));
+                last_draw = None;
+            }
+            None => {}
+        }
+        if STOP_REQUESTED.load(Ordering::SeqCst) {
             break;
         }
         if last_disk_check.elapsed() >= Duration::from_secs(10) {
@@ -194,7 +204,9 @@ fn monitor(mut session: Session, header: &str) -> Session {
         }
         if last_draw.is_none_or(|t| t.elapsed() >= Duration::from_secs(1)) {
             last_draw = Some(Instant::now());
-            let lines = render(&mut session, header, free);
+            let statuses = session.status();
+            states = statuses.iter().map(|s| s.state).collect();
+            let lines = render(&session, &statuses, header, free, notice.as_deref());
             let _ = term.clear_last_lines(drawn);
             for line in &lines {
                 let _ = term.write_line(line);
@@ -209,8 +221,32 @@ fn monitor(mut session: Session, header: &str) -> Session {
     session
 }
 
-fn render(session: &mut Session, header: &str, free: Option<u64>) -> Vec<String> {
-    let statuses = session.status();
+/// Relance le programme des sources perdues ou introuvables qui peuvent
+/// l'être (navigateurs, applications avec relance activée).
+fn relaunch_lost(sources: &[Source], states: &[SourceState]) -> String {
+    let mut launched = Vec::new();
+    for (source, state) in sources.iter().zip(states) {
+        if matches!(state, SourceState::Lost | SourceState::Searching) && source.should_launch() {
+            match resolve::launch(source) {
+                Ok(()) => launched.push(source.name.clone()),
+                Err(e) => log::warn!("relance de {} impossible : {e:#}", source.name),
+            }
+        }
+    }
+    if launched.is_empty() {
+        "Aucune source perdue à rouvrir.".into()
+    } else {
+        format!("Réouverture : {}", launched.join(", "))
+    }
+}
+
+fn render(
+    session: &Session,
+    statuses: &[SourceStatus],
+    header: &str,
+    free: Option<u64>,
+    notice: Option<&str>,
+) -> Vec<String> {
     let mut lines = vec![
         format!(
             "{}  {}   {}",
@@ -235,15 +271,18 @@ fn render(session: &mut Session, header: &str, free: Option<u64>) -> Vec<String>
             .underlined()
             .to_string(),
     ];
-    for status in &statuses {
+    for status in statuses {
         lines.push(source_line(status));
         if let Some(error) = &status.error {
             lines.push(format!("    {}", style(ui::truncate(error, 110)).yellow()));
         }
     }
     lines.push(String::new());
+    if let Some(notice) = notice {
+        lines.push(style(notice).cyan().to_string());
+    }
     lines.push(
-        style("Appuie sur Q ou Échap pour arrêter. Les fichiers restent lisibles même en cas de coupure.")
+        style("Q ou Échap : arrêter · R : rouvrir les sources perdues. Les fichiers restent lisibles même en cas de coupure.")
             .dim()
             .to_string(),
     );
