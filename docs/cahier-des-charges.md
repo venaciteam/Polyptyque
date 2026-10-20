@@ -455,7 +455,7 @@ La session simulée (`polyptyque-engine/tests`) rejoue un enregistrement complet
 | Capture audio | WASAPI « process loopback », mode arbre de processus | Son d'un programme et de ses sous-programmes |
 | Encodage et MKV | [[FFmpeg]] 8.1 (version GPL) : un processus par source, alimenté par deux tubes nommés (image NV12, son flottant) | NVENC, AMF, Quick Sync, x264 ; une panne d'encodeur n'affecte qu'une source |
 | Conversion d'image | Processeur vidéo Direct3D 11 de la carte graphique | Mise à l'échelle et conversion NV12 BT.709 sans passer par le processeur |
-| Interface | [[Slint]] (recommandé) | Apparence décrite dans des fichiers `.slint` séparés de la logique ; compatible GPL v3 ; accessibilité via AccessKit ; aperçus par tampons d'image |
+| Interface | [[Slint]] | Apparence décrite dans des fichiers `.slint` séparés de la logique ; compatible GPL v3 ; accessibilité via AccessKit ; aperçus par tampons d'image |
 | Installateur | [[Velopack]] | Un seul `Setup.exe`, sans question, mises à jour automatiques |
 | Sauvegarde des scènes | Fichier de configuration dans `%APPDATA%\Polyptyque` | |
 | Fabrication des exécutables | GitHub Actions sur machine Windows | |
@@ -521,9 +521,11 @@ Seule une implémentation de `Platform` est à écrire pour chaque système (`po
 | 2026-10-20 | Modèle de nom par défaut : `{date}_{heure}_{scène}_{source}` |
 | 2026-10-20 | Logiciel **gratuit**, **open source**, licence GPL v3 ou ultérieure |
 | 2026-10-20 | Pas de signature payante ; piste SignPath Foundation (gratuite) à la publication |
-| 2026-10-20 | Installateur : un seul `.exe`, sans question, agréable → [[Velopack]] |
-| 2026-10-20 | Interface légère, épurée, facilement remplaçable → [[Slint]] recommandé |
+| 2026-10-20 | Installateur : un seul `.exe`, sans question, agréable → **[[Velopack]]**, validé |
+| 2026-10-20 | Interface légère, épurée, facilement remplaçable → **[[Slint]]**, validé |
 | 2026-10-20 | Encodage par un processus FFmpeg 8.1 par source (pilotes NVIDIA 570+) |
+| 2026-10-20 | Branches : `dev` pour le travail en cours, `main` pour les versions validées (fusion de `dev` dans `main` après validation) |
+| 2026-10-20 | Premier essai sur la machine de référence : capture, encodage NVENC et fichier vidéo fonctionnels |
 
 ---
 
@@ -533,8 +535,9 @@ Seule une implémentation de `Platform` est à écrire pour chaque système (`po
 - [ ] **Télémétrie** : proposition d'aucune collecte de données.
 - [ ] **Format du fichier micro** : `.mka` envisagé, compatibilité montage à vérifier.
 - [ ] **Débit vidéo par défaut** : à fixer après mesures sur la machine de référence (12 000 kb/s provisoire).
-- [ ] **Technologie d'interface** : [[Slint]] recommandé, à confirmer au début de l'étape 2.
 - [x] ~~Distribution du logiciel~~ : gratuit, open source (GPL v3), sans signature payante.
+- [x] ~~Technologie d'interface~~ : [[Slint]].
+- [x] ~~Installateur~~ : [[Velopack]].
 
 ---
 

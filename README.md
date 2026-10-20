@@ -24,6 +24,13 @@ Windows d'abord ; architecture prévue pour macOS et Linux.
 | `crates/polyptyque-engine` | Sessions d'enregistrement, fils de capture, encodeurs |
 | `crates/polyptyque-cli` | Prototype en console |
 
+## Branches
+
+| Branche | Rôle |
+|---|---|
+| `dev` | Travail en cours |
+| `main` | Versions validées : `dev` y est fusionnée après validation |
+
 ## Fabrication
 
 Chaque envoi sur GitHub lance les vérifications et fabrique le prototype
