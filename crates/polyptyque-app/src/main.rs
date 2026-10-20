@@ -9,10 +9,11 @@ mod convert;
 mod demo;
 mod format;
 mod preview;
+mod update;
 
 use std::fs::{self, File};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use anyhow::Result;
 use polyptyque_core::{naming, paths};
@@ -20,7 +21,19 @@ use simplelog::{ConfigBuilder, LevelFilter, WriteLogger};
 
 slint::include_modules!();
 
+/// Version installée par une mise à jour, si Polyptyque vient d'être
+/// relancé par elle.
+pub static UPDATED_TO: OnceLock<String> = OnceLock::new();
+
 fn main() {
+    // Installateur et mises à jour : doit passer en premier (il peut
+    // terminer le programme, par exemple pendant une installation).
+    #[cfg(windows)]
+    velopack::VelopackApp::build()
+        .on_restarted(|version| {
+            let _ = UPDATED_TO.set(version.to_string());
+        })
+        .run();
     let log = init_logging();
     log::info!("Polyptyque {} (interface graphique)", env!("CARGO_PKG_VERSION"));
     if let Err(e) = launch() {

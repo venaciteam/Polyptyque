@@ -5,12 +5,23 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Publication d'une version (étiquette « v1.2.3 ») : création de la page de
+# version GitHub, d'où Polyptyque télécharge ses mises à jour.
+permissions:
+  contents: write
+
 env:
   CARGO_TERM_COLOR: always
   # FFmpeg 8.1 : en-têtes NVIDIA SDK 13.0, compatibles avec les pilotes 570+.
   # Les versions 9.x exigent des pilotes 610+.
   FFMPEG_ZIP: ffmpeg-n8.1-latest-win64-gpl-8.1
   FFMPEG_URL: https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-win64-gpl-8.1.zip
+  # Installateur : même version que la bibliothèque velopack de l'application.
+  VPK_VERSION: 1.2.161
+  # Dossier d'installation : %LOCALAPPDATA%\PolyptyqueApp, distinct des données
+  # (%LOCALAPPDATA%\Polyptyque, %APPDATA%\Polyptyque), qu'une désinstallation
+  # ne touche donc pas.
+  PACK_ID: PolyptyqueApp
 
 jobs:
   tests:
@@ -64,8 +75,47 @@ jobs:
           Copy-Item packaging/LISEZMOI.txt $dist/
           & "$dist/ffmpeg.exe" -hide_banner -version | Select-Object -First 1
           & "$dist/ffmpeg.exe" -hide_banner -encoders | Select-String -Pattern "nvenc|amf|qsv|libx264"
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Installateur
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          dotnet tool update -g vpk --version $env:VPK_VERSION
+          $env:PATH = "$env:USERPROFILE\.dotnet\tools;$env:PATH"
+          "$env:USERPROFILE\.dotnet\tools" | Out-File -FilePath $env:GITHUB_PATH -Append
+          $version = ((cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages | Where-Object name -eq "polyptyque-app").version
+          "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+          $repo = "https://github.com/${{ github.repository }}"
+          if ("${{ github.ref_type }}" -eq "tag") {
+            if ("${{ github.ref_name }}" -ne "v$version") {
+              throw "L'étiquette ${{ github.ref_name }} ne correspond pas à la version $version (Cargo.toml)."
+            }
+            # Version précédente : permet des mises à jour partielles, plus légères.
+            vpk download github --repoUrl $repo --token $env:GITHUB_TOKEN --outputDir releases
+          }
+          vpk pack --packId $env:PACK_ID --packVersion $version --packDir dist/Polyptyque `
+            --mainExe polyptyque.exe --packTitle Polyptyque --packAuthors Polyptyque `
+            --icon assets/logo/polyptyque.ico --splashImage assets/logo/installation.gif `
+            --runtime win10.0.19041-x64 --outputDir releases
+          if ($LASTEXITCODE -ne 0) { throw "vpk pack a échoué" }
+          Get-ChildItem releases
+          New-Item -ItemType Directory -Force -Path livraison | Out-Null
+          Copy-Item "releases/$env:PACK_ID-win-Setup.exe" livraison/Polyptyque-Setup.exe
+          Copy-Item "releases/$env:PACK_ID-win-Portable.zip" livraison/Polyptyque-portable.zip
       - uses: actions/upload-artifact@v4
         with:
           name: Polyptyque-windows
-          path: dist/
+          path: livraison/
           retention-days: 30
+      - name: Publication de la version
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          vpk upload github --repoUrl "https://github.com/${{ github.repository }}" --token $env:GITHUB_TOKEN `
+            --outputDir releases --tag "v$env:VERSION" --releaseName "Polyptyque $env:VERSION" --publish
+          if ($LASTEXITCODE -ne 0) { throw "publication échouée" }

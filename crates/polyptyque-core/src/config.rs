@@ -240,6 +240,8 @@ pub struct Settings {
     /// Conversion automatique en MP4 à la fin de chaque enregistrement
     /// (le MKV d'origine est conservé).
     pub convert_to_mp4: bool,
+    /// Recherche d'une nouvelle version au démarrage (sur GitHub).
+    pub check_updates: bool,
     pub video: VideoSettings,
     pub audio: AudioSettings,
     pub microphone: MicrophoneSettings,
@@ -253,6 +255,7 @@ impl Default for Settings {
             filename_template: DEFAULT_TEMPLATE.to_string(),
             previews: true,
             convert_to_mp4: false,
+            check_updates: true,
             video: VideoSettings::default(),
             audio: AudioSettings::default(),
             microphone: MicrophoneSettings::default(),

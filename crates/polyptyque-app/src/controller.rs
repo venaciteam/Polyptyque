@@ -35,6 +35,7 @@ use slint::{CloseRequestResponse, ComponentHandle, Image, Model, ModelRc, Shared
 use crate::convert::{ConversionEvent, Converter};
 use crate::format;
 use crate::preview::{self, PreviewManager, PreviewState};
+use crate::update;
 use crate::{AppWindow, Bridge, SceneItem, SourceCard, SourceItem, WindowItem};
 
 const LAUNCH_WAIT: Duration = Duration::from_secs(30);
@@ -42,6 +43,10 @@ const DISK_STOP_THRESHOLD: u64 = 1_000_000_000;
 const DISK_WARNING_THRESHOLD: u64 = 10_000_000_000;
 const BACKLOG_WARNING_SECONDS: f32 = 2.0;
 const TOAST_DURATION: Duration = Duration::from_secs(7);
+/// Délai avant la première recherche de mise à jour, puis intervalle entre
+/// deux recherches (pour les sessions longues).
+const UPDATE_FIRST_CHECK: Duration = Duration::from_secs(5);
+const UPDATE_CHECK_INTERVAL: Duration = Duration::from_secs(6 * 3600);
 /// Raison affichée par Windows si l'on éteint pendant un enregistrement.
 #[cfg(windows)]
 const SHUTDOWN_REASON: &str = "Enregistrement en cours : arrête-le dans Polyptyque pour finaliser les fichiers.";
@@ -59,6 +64,17 @@ enum Confirm {
     QuitWhileRecording,
     QuitWhileConverting,
     CancelConversion,
+    InstallUpdate,
+}
+
+/// Où en est la mise à jour proposée.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum UpdateState {
+    None,
+    Available,
+    Downloading,
+    /// Téléchargée : s'installe au redémarrage de Polyptyque.
+    Ready,
 }
 
 /// Suivi de la file de conversion MP4, pour l'affichage.
@@ -123,6 +139,10 @@ pub struct App {
     mic_choices: RefCell<Vec<(String, String)>>,
     /// Un problème de micro a déjà été signalé pendant cet enregistrement.
     mic_warned: Cell<bool>,
+    /// Nouvelle version trouvée, et où en est son installation.
+    update: RefCell<Option<update::Available>>,
+    update_state: Cell<UpdateState>,
+    update_checking: Cell<bool>,
     #[cfg(windows)]
     hotkeys: RefCell<Option<polyptyque_windows::hotkeys::HotkeyListener>>,
     /// La fermeture de session Windows est surveillée.
@@ -185,6 +205,9 @@ pub fn run(platform: Arc<dyn Platform>, paths: Paths, initial: Option<Config>) -
         conversion: RefCell::new(ConversionProgress::default()),
         mic_choices: RefCell::new(Vec::new()),
         mic_warned: Cell::new(false),
+        update: RefCell::new(None),
+        update_state: Cell::new(UpdateState::None),
+        update_checking: Cell::new(false),
         #[cfg(windows)]
         hotkeys: RefCell::new(None),
         #[cfg(windows)]
@@ -204,6 +227,8 @@ pub fn run(platform: Arc<dyn Platform>, paths: Paths, initial: Option<Config>) -
     app.register_hotkeys();
     if let Some(message) = warning {
         app.toast(&message, 2);
+    } else if let Some(version) = crate::UPDATED_TO.get() {
+        app.toast(&format!("Polyptyque a été mis à jour : version {version}."), 1);
     }
 
     ui.window()
@@ -216,6 +241,14 @@ pub fn run(platform: Arc<dyn Platform>, paths: Paths, initial: Option<Config>) -
     let preview_timer = Timer::default();
     preview_timer.start(TimerMode::Repeated, Duration::from_millis(100), || {
         with_app(|app| app.tick_previews());
+    });
+    // Mises à jour : peu après le démarrage, puis régulièrement.
+    Timer::single_shot(UPDATE_FIRST_CHECK, || {
+        with_app(|app| app.check_for_updates());
+    });
+    let update_timer = Timer::default();
+    update_timer.start(TimerMode::Repeated, UPDATE_CHECK_INTERVAL, || {
+        with_app(|app| app.check_for_updates());
     });
 
     ui.run().context("boucle de l'interface")?;
@@ -299,6 +332,9 @@ fn install_callbacks(ui: &AppWindow) {
     });
     b.on_convert_files(|| {
         with_app(|a| a.convert_files());
+    });
+    b.on_install_update(|| {
+        with_app(|a| a.install_update());
     });
     b.on_open_mic_privacy(|| {
         with_app(|a| a.open_mic_privacy());
@@ -981,6 +1017,154 @@ impl App {
         self.refresh_disk(false);
     }
 
+    // ----- Mises à jour -----------------------------------------------------
+
+    fn check_for_updates(&self) {
+        if !self.config.borrow().settings.check_updates
+            || self.update_state.get() != UpdateState::None
+            || self.update_checking.get()
+        {
+            return;
+        }
+        self.update_checking.set(true);
+        thread::spawn(|| {
+            let result = catch_unwind(update::check).unwrap_or_else(|_| Err(anyhow!("erreur interne")));
+            post(move |app| app.on_update_checked(result));
+        });
+    }
+
+    fn on_update_checked(&self, result: Result<Option<update::Available>>) {
+        self.update_checking.set(false);
+        match result {
+            Ok(Some(available)) => {
+                log::info!("nouvelle version disponible : {}", available.version);
+                let version = available.version.clone();
+                *self.update.borrow_mut() = Some(available);
+                self.set_update_state(UpdateState::Available);
+                self.toast(
+                    &format!("Polyptyque {version} est disponible : clique sur la pastille en haut pour l'installer."),
+                    1,
+                );
+            }
+            Ok(None) => log::info!("Polyptyque est à jour"),
+            // Sans connexion, ou version non installée : rien à signaler.
+            Err(e) => log::info!("recherche de mise à jour impossible : {e:#}"),
+        }
+    }
+
+    fn set_update_state(&self, state: UpdateState) {
+        self.update_state.set(state);
+        let version = self.update.borrow().as_ref().map(|u| u.version.clone()).unwrap_or_default();
+        let (key, text) = match state {
+            UpdateState::None => ("", String::new()),
+            UpdateState::Available => ("available", format!("Version {version} disponible")),
+            UpdateState::Downloading => ("downloading", "Téléchargement de la mise à jour…".to_string()),
+            UpdateState::Ready => ("ready", format!("Redémarrer pour passer à la version {version}")),
+        };
+        self.with_bridge(|b| {
+            b.set_update_state(key.into());
+            b.set_update_text(text.into());
+        });
+    }
+
+    /// Une mise à jour ne doit jamais interrompre un enregistrement ou une
+    /// conversion. Renvoie le message à afficher sinon.
+    fn update_blocked(&self) -> Option<&'static str> {
+        if self.recording() || self.busy.get() {
+            Some("La mise à jour pourra être installée une fois l'enregistrement arrêté.")
+        } else if self.with_bridge_value(|b| b.get_converting()) {
+            Some("La mise à jour pourra être installée une fois la conversion MP4 terminée.")
+        } else {
+            None
+        }
+    }
+
+    fn install_update(&self) {
+        let Some(available) = self.update.borrow().clone() else {
+            return;
+        };
+        match self.update_state.get() {
+            UpdateState::Available => {
+                if let Some(message) = self.update_blocked() {
+                    self.toast(message, 2);
+                    return;
+                }
+                self.ask(
+                    Confirm::InstallUpdate,
+                    "Mettre à jour Polyptyque",
+                    &format!(
+                        "Télécharger la version {} ({}) puis redémarrer Polyptyque ? Scènes, réglages et connexions des navigateurs sont conservés.",
+                        available.version,
+                        format::bytes(available.size)
+                    ),
+                    "Mettre à jour",
+                );
+            }
+            UpdateState::Ready => self.apply_update(),
+            UpdateState::Downloading | UpdateState::None => {}
+        }
+    }
+
+    fn download_update(&self) {
+        let Some(available) = self.update.borrow().clone() else {
+            return;
+        };
+        self.set_update_state(UpdateState::Downloading);
+        self.with_bridge(|b| b.set_update_progress(0.0));
+        thread::spawn(move || {
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                update::download(&available, &|progress| {
+                    post(move |app| {
+                        let text = format!("Téléchargement de la mise à jour · {:.0} %", progress * 100.0);
+                        app.with_bridge(|b| {
+                            b.set_update_progress(progress);
+                            b.set_update_text(text.into());
+                        });
+                    })
+                })
+            }))
+            .unwrap_or_else(|_| Err(anyhow!("erreur interne")));
+            post(move |app| app.on_update_downloaded(result));
+        });
+    }
+
+    fn on_update_downloaded(&self, result: Result<()>) {
+        match result {
+            Ok(()) => {
+                self.set_update_state(UpdateState::Ready);
+                match self.update_blocked() {
+                    None => self.apply_update(),
+                    Some(_) => self.toast(
+                        "Mise à jour téléchargée : clique sur la pastille une fois l'enregistrement terminé, ou elle s'installera au prochain démarrage.",
+                        1,
+                    ),
+                }
+            }
+            Err(e) => {
+                log::warn!("téléchargement de la mise à jour : {e:#}");
+                self.set_update_state(UpdateState::Available);
+                self.toast(&format!("Téléchargement de la mise à jour impossible : {e:#}"), 3);
+            }
+        }
+    }
+
+    /// Ferme Polyptyque, installe la nouvelle version et la relance.
+    fn apply_update(&self) {
+        if let Some(message) = self.update_blocked() {
+            self.toast(message, 2);
+            return;
+        }
+        let Some(available) = self.update.borrow().clone() else {
+            return;
+        };
+        log::info!("installation de la version {}", available.version);
+        self.previews.borrow_mut().stop();
+        if let Err(e) = update::apply(&available) {
+            log::warn!("installation de la mise à jour : {e:#}");
+            self.toast(&format!("Installation de la mise à jour impossible : {e:#}"), 3);
+        }
+    }
+
     // ----- Micro -----------------------------------------------------------
 
     fn show_microphone(&self, status: &SourceStatus) {
@@ -1504,6 +1688,7 @@ impl App {
             s.filename_template.clone(),
             s.previews,
             s.convert_to_mp4,
+            s.check_updates,
             hotkey_index(&s.hotkeys.toggle_recording),
             hotkey_index(&s.hotkeys.show_window),
             hotkey_index(&s.hotkeys.toggle_previews),
@@ -1546,13 +1731,14 @@ impl App {
             b.set_template(values.9.into());
             b.set_settings_previews(values.10);
             b.set_settings_convert(values.11);
+            b.set_settings_check_updates(values.12);
             b.set_settings_mic(mic_enabled);
             b.set_mic_choices(ModelRc::new(VecModel::from(mic_labels)));
             b.set_mic_index(mic_index as i32);
             b.set_hotkey_choices(ModelRc::new(VecModel::from(hotkey_choices)));
-            b.set_hotkey_record_index(values.12);
-            b.set_hotkey_show_index(values.13);
-            b.set_hotkey_previews_index(values.14);
+            b.set_hotkey_record_index(values.13);
+            b.set_hotkey_show_index(values.14);
+            b.set_hotkey_previews_index(values.15);
             b.set_settings_error("".into());
             b.set_sheet("settings".into());
         });
@@ -1614,6 +1800,8 @@ impl App {
         }
         let previews_before;
         let previews_after;
+        let check_updates_before;
+        let check_updates_after;
         {
             let mut config = self.config.borrow_mut();
             let s = &mut config.settings;
@@ -1637,6 +1825,9 @@ impl App {
             s.previews = b.get_settings_previews();
             previews_after = s.previews;
             s.convert_to_mp4 = b.get_settings_convert();
+            check_updates_before = s.check_updates;
+            s.check_updates = b.get_settings_check_updates();
+            check_updates_after = s.check_updates;
             s.microphone.enabled = b.get_settings_mic();
             if let Some((id, name)) = self.mic_choices.borrow().get(b.get_mic_index().max(0) as usize) {
                 if *id != s.microphone.device_id {
@@ -1657,6 +1848,9 @@ impl App {
         }
         self.register_hotkeys();
         self.toast("Réglages enregistrés.", 1);
+        if check_updates_after && !check_updates_before {
+            self.check_for_updates();
+        }
     }
 
     fn open_output_folder(&self) {
@@ -1682,8 +1876,10 @@ impl App {
     }
 
     fn ask(&self, action: Confirm, title: &str, text: &str, button: &str) {
+        let danger = !matches!(action, Confirm::InstallUpdate);
         *self.confirm.borrow_mut() = Some(action);
         self.with_bridge(|b| {
+            b.set_confirm_danger(danger);
             b.set_confirm_title(title.into());
             b.set_confirm_text(text.into());
             b.set_confirm_button(button.into());
@@ -1716,6 +1912,7 @@ impl App {
                 self.refresh_all();
                 self.restart_previews();
             }
+            Some(Confirm::InstallUpdate) => self.download_update(),
             Some(Confirm::CancelConversion) => {
                 if let Some(converter) = self.converter.borrow().as_ref() {
                     self.conversion.borrow_mut().cancelled = true;

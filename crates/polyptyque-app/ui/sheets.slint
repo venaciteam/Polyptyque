@@ -203,7 +203,7 @@ export component ConfirmSheet inherits Sheet {
         }
         ActionButton {
             text: Bridge.confirm-button;
-            kind: "danger";
+            kind: Bridge.confirm-danger ? "danger" : "primary";
             clicked => {
                 Bridge.confirm-accepted();
             }
@@ -353,6 +353,13 @@ export component SettingsSheet inherits Sheet {
                     toggled(value) => {
                         Bridge.settings-convert = value;
                     }
+                }
+            }
+            Toggle {
+                text: "Rechercher les mises à jour au démarrage";
+                checked: Bridge.settings-check-updates;
+                toggled(value) => {
+                    Bridge.settings-check-updates = value;
                 }
             }
             Field {

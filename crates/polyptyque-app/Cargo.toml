@@ -23,6 +23,7 @@ slint = { version = "1.18", features = ["raw-window-handle-06"] }
 polyptyque-windows.workspace = true
 raw-window-handle = "0.6"
 rfd = { version = "0.17", default-features = false }
+velopack = "1.2"
 
 [build-dependencies]
 embed-resource = "3.0"
