@@ -11,6 +11,7 @@ mod browsers;
 pub mod hotkeys;
 mod pipe;
 mod process;
+pub mod session_end;
 mod system;
 mod video;
 mod windows_list;

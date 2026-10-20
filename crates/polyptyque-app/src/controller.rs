@@ -42,6 +42,9 @@ const DISK_STOP_THRESHOLD: u64 = 1_000_000_000;
 const DISK_WARNING_THRESHOLD: u64 = 10_000_000_000;
 const BACKLOG_WARNING_SECONDS: f32 = 2.0;
 const TOAST_DURATION: Duration = Duration::from_secs(7);
+/// Raison affichée par Windows si l'on éteint pendant un enregistrement.
+#[cfg(windows)]
+const SHUTDOWN_REASON: &str = "Enregistrement en cours : arrête-le dans Polyptyque pour finaliser les fichiers.";
 
 const RESOLUTIONS: [(u32, u32); 4] = [(1280, 720), (1920, 1080), (2560, 1440), (3840, 2160)];
 const FRAME_RATES: [u32; 5] = [24, 25, 30, 50, 60];
@@ -92,6 +95,8 @@ pub struct App {
     config_path: PathBuf,
     profiles_root: PathBuf,
     session: RefCell<Option<Session>>,
+    /// Fil qui finalise un enregistrement arrêté.
+    stop_thread: RefCell<Option<thread::JoinHandle<()>>>,
     busy: Cell<bool>,
     previews: RefCell<PreviewManager>,
     /// Définition actuelle des aperçus, et celle qui attend d'être confirmée
@@ -117,6 +122,9 @@ pub struct App {
     mic_warned: Cell<bool>,
     #[cfg(windows)]
     hotkeys: RefCell<Option<polyptyque_windows::hotkeys::HotkeyListener>>,
+    /// La fermeture de session Windows est surveillée.
+    #[cfg(windows)]
+    session_watch: Cell<bool>,
 }
 
 thread_local! {
@@ -154,6 +162,7 @@ pub fn run(platform: Arc<dyn Platform>, paths: Paths, initial: Option<Config>) -
         config_path: paths.config,
         profiles_root: paths.profiles,
         session: RefCell::new(None),
+        stop_thread: RefCell::new(None),
         busy: Cell::new(false),
         previews: RefCell::new(PreviewManager::default()),
         preview_size: Cell::new(preview::default_size()),
@@ -174,6 +183,8 @@ pub fn run(platform: Arc<dyn Platform>, paths: Paths, initial: Option<Config>) -
         mic_warned: Cell::new(false),
         #[cfg(windows)]
         hotkeys: RefCell::new(None),
+        #[cfg(windows)]
+        session_watch: Cell::new(false),
     });
     APP.with(|a| *a.borrow_mut() = Some(app.clone()));
     *app.converter.borrow_mut() =
@@ -675,6 +686,7 @@ impl App {
         match Session::start(self.platform.clone(), plan) {
             Ok(session) => {
                 self.mic_warned.set(false);
+                self.set_shutdown_block(true);
                 let microphone = config.settings.microphone.enabled;
                 self.with_bridge(|b| b.set_mic_recording(microphone));
                 *self.session.borrow_mut() = Some(session);
@@ -822,16 +834,21 @@ impl App {
             return;
         };
         self.set_busy("Arrêt : finalisation des fichiers…");
-        thread::spawn(move || {
+        let handle = thread::spawn(move || {
             let (summaries, reason) = match catch_unwind(AssertUnwindSafe(move || session.stop())) {
                 Ok(summaries) => (summaries, reason),
                 Err(_) => (Vec::new(), Some("Erreur interne pendant l'arrêt (voir le journal).".to_string())),
             };
             post(move |app| app.finish_stop(summaries, reason));
         });
+        *self.stop_thread.borrow_mut() = Some(handle);
     }
 
     fn finish_stop(&self, summaries: Vec<SourceSummary>, reason: Option<String>) {
+        if let Some(handle) = self.stop_thread.borrow_mut().take() {
+            let _ = handle.join();
+        }
+        self.set_shutdown_block(false);
         self.set_busy("");
         self.with_bridge(|b| {
             b.set_recording(false);
@@ -875,6 +892,7 @@ impl App {
 
     fn tick_status(&self) {
         self.update_preview_size();
+        self.watch_session_end();
         let statuses: Vec<SourceStatus> = {
             let mut session = self.session.borrow_mut();
             let Some(session) = session.as_mut() else {
@@ -1712,6 +1730,94 @@ impl App {
         self.previews.borrow_mut().stop();
         CloseRequestResponse::HideWindow
     }
+
+    // ----- Fermeture de la session Windows ---------------------------------
+
+    /// Poignée de la fenêtre principale (une fois créée par le système).
+    #[cfg(windows)]
+    fn main_window(&self) -> Option<isize> {
+        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+        let ui = self.ui.upgrade()?;
+        let handle = ui.window().window_handle();
+        match handle.window_handle().ok()?.as_raw() {
+            RawWindowHandle::Win32(window) => Some(window.hwnd.get()),
+            _ => None,
+        }
+    }
+
+    /// Arrêt, redémarrage ou déconnexion de Windows : surveillé dès que la
+    /// fenêtre existe.
+    #[cfg(windows)]
+    fn watch_session_end(&self) {
+        if self.session_watch.get() {
+            return;
+        }
+        let Some(window) = self.main_window() else {
+            return;
+        };
+        self.session_watch.set(true);
+        let watched = polyptyque_windows::session_end::watch(window, |event| {
+            with_app(|app| app.on_session_end(event)).unwrap_or(false)
+        });
+        if let Err(e) = watched {
+            log::warn!("{e:#}");
+        }
+    }
+
+    #[cfg(not(windows))]
+    fn watch_session_end(&self) {}
+
+    /// Renvoie vrai pour demander à Windows de ne pas fermer la session.
+    #[cfg(windows)]
+    fn on_session_end(&self, event: polyptyque_windows::session_end::SessionEnd) -> bool {
+        use polyptyque_windows::session_end::SessionEnd;
+        match event {
+            SessionEnd::Query => self.recording() || self.stop_thread.borrow().is_some(),
+            SessionEnd::Ending => {
+                self.finalize_now();
+                false
+            }
+        }
+    }
+
+    /// La session Windows se ferme malgré tout : les fichiers sont
+    /// finalisés tout de suite, avant que Windows ne ferme Polyptyque.
+    #[cfg(windows)]
+    fn finalize_now(&self) {
+        self.previews.borrow_mut().stop();
+        let session = self.session.try_borrow_mut().ok().and_then(|mut s| s.take());
+        if let Some(session) = session {
+            let summaries = session.stop();
+            log::info!("{} source(s) finalisée(s) avant la fermeture de session", summaries.len());
+        }
+        // Arrêt déjà en cours : on attend qu'il se termine.
+        let stopping = self.stop_thread.try_borrow_mut().ok().and_then(|mut t| t.take());
+        if let Some(handle) = stopping {
+            let _ = handle.join();
+        }
+        // Une conversion interrompue efface son fichier partiel.
+        let converter = self.converter.try_borrow_mut().ok().and_then(|mut c| c.take());
+        drop(converter);
+    }
+
+    /// Déclare (ou retire) l'enregistrement en cours auprès de Windows, qui
+    /// l'affiche si l'on tente d'éteindre ou de se déconnecter.
+    #[cfg(windows)]
+    fn set_shutdown_block(&self, on: bool) {
+        let Some(window) = self.main_window() else {
+            return;
+        };
+        if on {
+            if let Err(e) = polyptyque_windows::session_end::block(window, SHUTDOWN_REASON) {
+                log::warn!("{e:#}");
+            }
+        } else {
+            polyptyque_windows::session_end::unblock(window);
+        }
+    }
+
+    #[cfg(not(windows))]
+    fn set_shutdown_block(&self, _: bool) {}
 
     // ----- Raccourcis clavier globaux --------------------------------------
 

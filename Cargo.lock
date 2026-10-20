@@ -3531,6 +3531,7 @@ dependencies = [
  "polyptyque-core",
  "polyptyque-engine",
  "polyptyque-windows",
+ "raw-window-handle",
  "rfd",
  "simplelog",
  "slint",
