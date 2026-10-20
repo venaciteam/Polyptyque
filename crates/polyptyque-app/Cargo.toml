@@ -25,4 +25,5 @@ raw-window-handle = "0.6"
 rfd = { version = "0.17", default-features = false }
 
 [build-dependencies]
+embed-resource = "3.0"
 slint-build = "1.18"

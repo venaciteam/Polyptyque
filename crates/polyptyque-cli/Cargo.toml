@@ -22,3 +22,6 @@ simplelog.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 polyptyque-windows.workspace = true
+
+[build-dependencies]
+embed-resource = "3.0"
