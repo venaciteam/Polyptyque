@@ -6,6 +6,7 @@ use anyhow::Result;
 use dialoguer::{Input, Select};
 use polyptyque_core::config::{Codec, Config, HardwarePreference};
 use polyptyque_core::naming::TEMPLATE_HELP;
+use polyptyque_core::platform::Platform;
 
 use crate::ui;
 
@@ -13,7 +14,7 @@ const RESOLUTIONS: [(u32, u32); 4] = [(1280, 720), (1920, 1080), (2560, 1440), (
 const FRAME_RATES: [u32; 5] = [24, 25, 30, 50, 60];
 const AUDIO_BITRATES: [u32; 5] = [128, 160, 192, 256, 320];
 
-pub fn menu(config: &mut Config) -> Result<()> {
+pub fn menu(platform: &dyn Platform, config: &mut Config) -> Result<()> {
     let theme = ui::theme();
     loop {
         let s = &config.settings;
@@ -27,6 +28,10 @@ pub fn menu(config: &mut Config) -> Result<()> {
             format!("Dossier des enregistrements : {}", s.output_dir.display()),
             format!("Modèle de nom de fichier : {}", s.filename_template),
             format!("Conversion MP4 à la fin de l'enregistrement : {}", if s.convert_to_mp4 { "oui" } else { "non" }),
+            format!(
+                "Micro (fichier séparé) : {}",
+                if s.microphone.enabled { s.microphone.label().to_string() } else { "désactivé".into() }
+            ),
             "Retour".to_string(),
         ];
         let choice = Select::with_theme(&theme)
@@ -126,6 +131,29 @@ pub fn menu(config: &mut Config) -> Result<()> {
                 settings.filename_template = text.trim().to_string();
             }
             8 => settings.convert_to_mp4 = !settings.convert_to_mp4,
+            9 => {
+                let devices = platform.list_microphones();
+                let mut options = vec!["Désactivé".to_string(), "Micro par défaut de Windows".to_string()];
+                options.extend(devices.iter().map(|d| d.name.clone()));
+                let i = Select::with_theme(&theme)
+                    .with_prompt("Micro à enregistrer")
+                    .items(&options)
+                    .default(0)
+                    .interact()?;
+                let micro = &mut settings.microphone;
+                micro.enabled = i > 0;
+                if i == 1 {
+                    micro.device_id.clear();
+                    micro.device_name.clear();
+                } else if let Some(device) = devices.get(i.saturating_sub(2)).filter(|_| i >= 2) {
+                    micro.device_id = device.id.clone();
+                    micro.device_name = device.name.clone();
+                }
+                if micro.enabled {
+                    println!("Windows doit autoriser l'accès au micro pour les applications de bureau (Paramètres > Confidentialité et sécurité > Microphone).");
+                    ui::pause();
+                }
+            }
             _ => return Ok(()),
         }
         config.normalize();

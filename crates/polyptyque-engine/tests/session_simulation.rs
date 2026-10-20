@@ -20,7 +20,7 @@ use anyhow::Result;
 use polyptyque_core::config::{new_id, Codec, HardwarePreference, Settings, Source, SourceKind, VideoSettings};
 use polyptyque_core::encoder::{EncoderChoice, EncoderKind};
 use polyptyque_core::platform::*;
-use polyptyque_engine::{remux, Session, SessionPlan, SourceState};
+use polyptyque_engine::{remux, MicrophonePlan, Session, SessionPlan, SourceState};
 
 const WIDTH: u32 = 320;
 const HEIGHT: u32 = 180;
@@ -76,6 +76,17 @@ impl Platform for SimPlatform {
         Ok(Box::new(SimVideo { width: w, height: h, counter: 0 }))
     }
     fn open_audio_capture(&self, _: u32, sample_rate: u32, channels: u16) -> Result<Box<dyn AudioCapture>> {
+        Ok(Box::new(SimAudio { start: self.start, sample_rate, channels, next_frame: None, phase: 0.0 }))
+    }
+    fn list_microphones(&self) -> Vec<AudioDevice> {
+        vec![AudioDevice { id: "sim".into(), name: "Micro simulé".into() }]
+    }
+    fn open_microphone_capture(
+        &self,
+        _: Option<&str>,
+        sample_rate: u32,
+        channels: u16,
+    ) -> Result<Box<dyn AudioCapture>> {
         Ok(Box::new(SimAudio { start: self.start, sample_rate, channels, next_frame: None, phase: 0.0 }))
     }
     fn create_stream_pipe(&self, name: &str) -> Result<Box<dyn StreamPipe>> {
@@ -200,6 +211,17 @@ fn measure(path: &Path) -> (f64, f64) {
     (video_frames / FPS as f64, audio_samples / 48_000.0)
 }
 
+/// Durée (secondes) du son décodé d'un fichier.
+fn audio_seconds(path: &Path) -> f64 {
+    let pcm = Command::new("ffmpeg")
+        .args(["-v", "error", "-i"])
+        .arg(path)
+        .args(["-map", "0:a:0", "-f", "s16le", "-ac", "1", "-ar", "48000", "-"])
+        .output()
+        .expect("décodage audio");
+    pcm.stdout.len() as f64 / 2.0 / 48_000.0
+}
+
 /// Étiquettes colorimétriques du flux vidéo.
 fn color_tags(path: &Path) -> String {
     let output = Command::new("ffprobe")
@@ -244,6 +266,7 @@ fn plan(root: &Path, sources: Vec<Source>) -> SessionPlan {
         encoder: EncoderChoice { kind: EncoderKind::Software, codec: Codec::H264 },
         ffmpeg: PathBuf::from("ffmpeg"),
         log_dir: root.join("journaux"),
+        microphone: None,
     }
 }
 
@@ -340,38 +363,18 @@ fn simulated_session_produces_synchronised_files() {
         eprintln!("FFmpeg absent : test ignoré");
         return;
     }
-    let root = std::env::temp_dir().join(format!("polyptyque-sim-{}", new_id()));
-    let pipes_dir = root.join("tubes");
-    fs::create_dir_all(&pipes_dir).unwrap();
-    let platform = Arc::new(SimPlatform { start: Instant::now(), pipes_dir });
-
-    let settings = Settings {
-        output_dir: root.join("sorties"),
-        filename_template: "{scène}_{source}".into(),
-        video: VideoSettings {
-            width: WIDTH,
-            height: HEIGHT,
-            fps: FPS,
-            codec: Codec::H264,
-            hardware: HardwarePreference::Cpu,
-            bitrate_kbps: 500,
-        },
-        ..Default::default()
-    };
-    let plan = SessionPlan {
-        scene_name: "Simulation".into(),
-        sources: vec![
+    let Sim { root, platform } = sim();
+    let mut plan = plan(
+        &root,
+        vec![
             application("Immédiate", "immediate"),
             application("Tardive", "tardive"),
             application("Absente", "absente"),
         ],
-        settings,
-        encoder: EncoderChoice { kind: EncoderKind::Software, codec: Codec::H264 },
-        ffmpeg: PathBuf::from("ffmpeg"),
-        log_dir: root.join("journaux"),
-    };
+    );
+    plan.microphone = Some(MicrophonePlan { device_id: None });
 
-    let mut session = Session::start(platform, plan).expect("démarrage");
+    let mut session = Session::start(platform.clone(), plan).expect("démarrage");
     let recording = Duration::from_secs(4);
     let started = Instant::now();
     while started.elapsed() < recording {
@@ -384,9 +387,24 @@ fn simulated_session_produces_synchronised_files() {
     assert_eq!(statuses[0].state, SourceState::Connected);
     assert_eq!(statuses[1].state, SourceState::Connected);
     assert_eq!(statuses[2].state, SourceState::Searching);
+    assert_eq!(session.microphone_status().map(|m| m.state), Some(SourceState::Connected));
     let elapsed = session.elapsed().as_secs_f64();
-    let summaries = session.stop();
+    let mut summaries = session.stop();
 
+    // Micro : fichier de son seul, sur la même horloge.
+    let micro = summaries.pop().expect("bilan du micro");
+    assert_eq!(micro.name, "Micro");
+    assert!(micro.outputs[0].ends_with("Simulation_Micro.mka"), "{:?}", micro.outputs);
+    let micro_seconds = audio_seconds(&micro.outputs[0]);
+    eprintln!("Micro : son {micro_seconds:.3} s, session {elapsed:.3} s");
+    assert!((micro_seconds - elapsed).abs() < 0.25, "micro {micro_seconds} s pour {elapsed} s");
+    let m4a =
+        remux::convert(platform.as_ref(), Path::new("ffmpeg"), &micro.outputs[0], &mut |_| {}, &AtomicBool::new(false))
+            .expect("conversion du micro");
+    assert!(m4a.ends_with("Simulation_Micro.m4a"));
+    assert!((audio_seconds(&m4a) - micro_seconds).abs() < 0.03);
+
+    assert_eq!(summaries.len(), 3);
     for summary in &summaries {
         assert!(summary.error.is_none(), "{} : {:?}", summary.name, summary.error);
         assert_eq!(summary.outputs.len(), 1, "{}", summary.name);

@@ -1,5 +1,6 @@
-//! Fil audio d'une source : capture du son du programme de la fenêtre et
-//! placement sur l'horloge commune (silence quand il n'y a rien).
+//! Fil audio d'une source : capture du son du programme de la fenêtre (ou
+//! du micro) et placement sur l'horloge commune (silence quand il n'y a
+//! rien).
 
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -11,7 +12,7 @@ use polyptyque_core::config::{CHANNELS, SAMPLE_RATE};
 use polyptyque_core::platform::{AudioCapture, AudioPacket, Platform};
 use polyptyque_core::timeline::{approximate_times, AudioTimeline, PacketTime, HNS_PER_SEC};
 
-use crate::shared::Shared;
+use crate::shared::{Shared, SourceState};
 
 const READ_TIMEOUT_MS: u32 = 20;
 const RETRY_HNS: u64 = 2 * HNS_PER_SEC;
@@ -21,9 +22,18 @@ const MAX_TIMESTAMP_SKEW_HNS: u64 = HNS_PER_SEC;
 /// En dessous, le son est considéré comme muet pour l'affichage.
 const SOUND_THRESHOLD: f32 = 0.0005;
 
+/// Origine du son.
+pub(crate) enum AudioInput {
+    /// Programme de la fenêtre suivie par le fil vidéo.
+    Window,
+    /// Micro (`None` : celui choisi par défaut dans Windows).
+    Microphone(Option<String>),
+}
+
 pub(crate) struct AudioTask {
     pub platform: Arc<dyn Platform>,
     pub name: String,
+    pub input: AudioInput,
     pub shared: Arc<Shared>,
     pub queue: Sender<Vec<u8>>,
     pub t0_hns: u64,
@@ -31,12 +41,13 @@ pub(crate) struct AudioTask {
 
 impl AudioTask {
     pub fn run(self) {
-        let AudioTask { platform, name, shared, queue, t0_hns } = self;
+        let AudioTask { platform, name, input, shared, queue, t0_hns } = self;
         let mut timeline = AudioTimeline::new(t0_hns, SAMPLE_RATE, CHANNELS);
         let mut capture: Option<Box<dyn AudioCapture>> = None;
         let mut generation = u64::MAX;
         let mut retry_at = 0u64;
         let mut warned_pid: Option<u32> = None;
+        let mut warned_microphone = false;
         let mut warned_skew = false;
         let mut packets: Vec<AudioPacket> = Vec::new();
         let mut out: Vec<u8> = Vec::new();
@@ -60,13 +71,32 @@ impl AudioTask {
             // La fenêtre a changé (rattachée, perdue, retrouvée) : on suit
             // son processus.
             let current = shared.target_generation();
-            if current != generation {
+            if matches!(input, AudioInput::Window) && current != generation {
                 generation = current;
                 capture = None;
                 retry_at = 0;
             }
             if capture.is_none() && now >= retry_at {
-                if let Some(pid) = shared.target_pid() {
+                if let AudioInput::Microphone(device) = &input {
+                    match platform.open_microphone_capture(device.as_deref(), SAMPLE_RATE, CHANNELS) {
+                        Ok(c) => {
+                            log::info!("[{name}] micro capturé");
+                            capture = Some(c);
+                            warned_microphone = false;
+                            shared.clear_note();
+                            shared.set_state(SourceState::Connected);
+                        }
+                        Err(e) => {
+                            if !warned_microphone {
+                                log::warn!("[{name}] micro indisponible : {e:#}");
+                                shared.note_error(format!("{e:#}"));
+                                warned_microphone = true;
+                            }
+                            shared.set_state(SourceState::Lost);
+                            retry_at = now + RETRY_HNS;
+                        }
+                    }
+                } else if let Some(pid) = shared.target_pid() {
                     match platform.open_audio_capture(pid, SAMPLE_RATE, CHANNELS) {
                         Ok(c) => {
                             log::info!("[{name}] son du processus {pid} capturé");
@@ -91,6 +121,9 @@ impl AudioTask {
                         log::warn!("[{name}] capture du son interrompue : {e:#}");
                         capture = None;
                         retry_at = now + RETRY_HNS;
+                        if matches!(input, AudioInput::Microphone(_)) {
+                            shared.set_state(SourceState::Lost);
+                        }
                     }
                 }
                 None => thread::sleep(Duration::from_millis(READ_TIMEOUT_MS as u64)),

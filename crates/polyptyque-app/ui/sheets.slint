@@ -218,11 +218,14 @@ export component SettingsSheet inherits Sheet {
         Bridge.close-sheet();
     }
 
+    // Deux colonnes de même largeur, remplies de haut en bas.
     HorizontalLayout {
         spacing: 28px;
         VerticalLayout {
             spacing: 14px;
+            alignment: start;
             horizontal-stretch: 1;
+            preferred-width: 0px;
             Text {
                 text: "Enregistrement";
                 color: Theme.text;
@@ -271,10 +274,41 @@ export component SettingsSheet inherits Sheet {
                     current-index <=> Bridge.audio-index;
                 }
             }
+            Field {
+                label: "Micro";
+                Toggle {
+                    text: "Enregistrer mon micro dans un fichier séparé";
+                    checked: Bridge.settings-mic;
+                    toggled(value) => {
+                        Bridge.settings-mic = value;
+                    }
+                }
+            }
+            if Bridge.settings-mic: ComboBox {
+                model: Bridge.mic-choices;
+                current-index <=> Bridge.mic-index;
+            }
+            if Bridge.settings-mic: Note {
+                text: "Le son de ce micro sera enregistré pendant chaque enregistrement, dans son propre fichier (.mka), calé sur les vidéos. Windows doit autoriser l'accès au micro pour les applications de bureau.";
+            }
+            if Bridge.settings-mic && Bridge.can-browse: HorizontalLayout {
+                alignment: start;
+                ActionButton {
+                    text: "Autorisations du micro dans Windows";
+                    icon: @image-url("icons/launch.svg");
+                    has-icon: true;
+                    kind: "ghost";
+                    clicked => {
+                        Bridge.open-mic-privacy();
+                    }
+                }
+            }
         }
         VerticalLayout {
             spacing: 14px;
+            alignment: start;
             horizontal-stretch: 1;
+            preferred-width: 0px;
             Text {
                 text: "Fichiers et interface";
                 color: Theme.text;
@@ -348,26 +382,27 @@ export component SettingsSheet inherits Sheet {
         tone: 3;
         text: Bridge.settings-error;
     }
-    Footer {
+    HorizontalLayout {
         Text {
             text: "Polyptyque \{Bridge.version}";
             color: Theme.text-faint;
             font-size: Theme.font-small;
             vertical-alignment: center;
-            horizontal-stretch: 1;
         }
-        ActionButton {
-            text: "Annuler";
-            kind: "ghost";
-            clicked => {
-                Bridge.close-sheet();
+        Footer {
+            ActionButton {
+                text: "Annuler";
+                kind: "ghost";
+                clicked => {
+                    Bridge.close-sheet();
+                }
             }
-        }
-        ActionButton {
-            text: "Enregistrer";
-            kind: "primary";
-            clicked => {
-                Bridge.save-settings();
+            ActionButton {
+                text: "Enregistrer";
+                kind: "primary";
+                clicked => {
+                    Bridge.save-settings();
+                }
             }
         }
     }

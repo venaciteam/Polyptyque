@@ -19,5 +19,5 @@ mod shared;
 mod video_task;
 mod writer;
 
-pub use session::{Session, SessionPlan, SourceStatus, SourceSummary};
+pub use session::{MicrophonePlan, Session, SessionPlan, SourceStatus, SourceSummary, MICROPHONE_ID};
 pub use shared::SourceState;

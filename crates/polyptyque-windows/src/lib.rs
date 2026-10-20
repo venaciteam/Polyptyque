@@ -1,7 +1,7 @@
 //! Implémentation Windows de [`Platform`] :
 //! - image : Windows.Graphics.Capture, conversion NV12 par la carte graphique ;
 //! - son : capture WASAPI « process loopback » (un programme et ses
-//!   sous-programmes) ;
+//!   sous-programmes), et micro ;
 //! - fenêtres, processus, navigateurs installés, tubes nommés.
 
 #![cfg(windows)]
@@ -20,7 +20,7 @@ use std::path::Path;
 use std::process::Command;
 
 use polyptyque_core::platform::{
-    AudioCapture, BrowserInstall, Platform, StreamPipe, VideoCapture, WindowHandle, WindowInfo,
+    AudioCapture, AudioDevice, BrowserInstall, Platform, StreamPipe, VideoCapture, WindowHandle, WindowInfo,
 };
 
 /// Pas de fenêtre de console pour FFmpeg.
@@ -81,7 +81,20 @@ impl Platform for WindowsPlatform {
     }
 
     fn open_audio_capture(&self, pid: u32, sample_rate: u32, channels: u16) -> anyhow::Result<Box<dyn AudioCapture>> {
-        Ok(Box::new(audio::LoopbackCapture::open(pid, sample_rate, channels)?))
+        Ok(Box::new(audio::WasapiCapture::process(pid, sample_rate, channels)?))
+    }
+
+    fn list_microphones(&self) -> Vec<AudioDevice> {
+        audio::microphones()
+    }
+
+    fn open_microphone_capture(
+        &self,
+        device_id: Option<&str>,
+        sample_rate: u32,
+        channels: u16,
+    ) -> anyhow::Result<Box<dyn AudioCapture>> {
+        Ok(Box::new(audio::WasapiCapture::microphone(device_id, sample_rate, channels)?))
     }
 
     fn create_stream_pipe(&self, name: &str) -> anyhow::Result<Box<dyn StreamPipe>> {

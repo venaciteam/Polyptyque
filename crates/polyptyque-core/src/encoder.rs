@@ -163,6 +163,33 @@ fn matroska_output() -> Vec<String> {
     strings(&["-cluster_time_limit", "1000", "-flush_packets", "1", "-f", "matroska"])
 }
 
+pub struct AudioRecordingSpec<'a> {
+    pub input: &'a str,
+    pub sample_rate: u32,
+    pub channels: u16,
+    pub bitrate_kbps: u32,
+    pub title: &'a str,
+    pub output: &'a Path,
+}
+
+/// Arguments d'un enregistrement de son seul (micro), en Matroska audio.
+pub fn audio_recording_args(spec: &AudioRecordingSpec) -> Vec<String> {
+    let mut args = strings(&["-hide_banner", "-nostdin", "-loglevel", "warning", "-f", "f32le", "-ar"]);
+    args.push(spec.sample_rate.to_string());
+    args.push("-ac".into());
+    args.push(spec.channels.to_string());
+    args.extend(raw_input_tuning());
+    args.push("-i".into());
+    args.push(spec.input.into());
+    args.extend(strings(&["-map", "0:a:0", "-c:a", "aac", "-b:a"]));
+    args.push(format!("{}k", spec.bitrate_kbps));
+    args.push("-metadata".into());
+    args.push(format!("title={}", spec.title));
+    args.extend(matroska_output());
+    args.push(spec.output.to_string_lossy().into_owned());
+    args
+}
+
 fn raw_input_tuning() -> Vec<String> {
     // Pas d'analyse préalable : le format est entièrement décrit par les
     // options, et une grande file évite de bloquer la lecture des tubes.
@@ -249,6 +276,24 @@ mod tests {
         let first_input = args.iter().position(|a| a == "-i").unwrap();
         let map = args.iter().position(|a| a == "-map").unwrap();
         assert!(first_input < map);
+    }
+
+    #[test]
+    fn audio_only_args_shape() {
+        let output = PathBuf::from("micro.mka");
+        let args = audio_recording_args(&AudioRecordingSpec {
+            input: "tube",
+            sample_rate: 48_000,
+            channels: 2,
+            bitrate_kbps: 192,
+            title: "Micro",
+            output: &output,
+        });
+        let joined = args.join(" ");
+        assert!(joined.contains("-f f32le -ar 48000 -ac 2"));
+        assert!(joined.contains("-i tube -map 0:a:0 -c:a aac -b:a 192k"));
+        assert!(!joined.contains("rawvideo"));
+        assert!(joined.ends_with("-f matroska micro.mka"));
     }
 
     #[test]

@@ -1,11 +1,19 @@
-//! Capture du son d'un programme (et de ses sous-programmes) par WASAPI
-//! « process loopback » : disponible depuis Windows 10 version 2004.
+//! Capture du son par WASAPI :
+//! - d'un programme (et de ses sous-programmes) en « process loopback »,
+//!   disponible depuis Windows 10 version 2004 ;
+//! - d'un micro.
 
-use anyhow::{Context, Result};
-use polyptyque_core::platform::{AudioCapture, AudioPacket};
-use wasapi::{AudioCaptureClient, AudioClient, Direction, Handle, SampleType, StreamMode, WaveFormat};
+use anyhow::{anyhow, Context, Result};
+use polyptyque_core::platform::{AudioCapture, AudioDevice, AudioPacket};
+use wasapi::{
+    AudioCaptureClient, AudioClient, DeviceEnumerator, Direction, Handle, SampleType, StreamMode, WasapiError,
+    WaveFormat,
+};
 
-pub struct LoopbackCapture {
+/// Accès refusé : réglage de confidentialité de Windows pour le micro.
+const E_ACCESSDENIED: i32 = 0x8007_0005_u32 as i32;
+
+pub struct WasapiCapture {
     // Gardé vivant tant que la capture tourne.
     client: AudioClient,
     capture: AudioCaptureClient,
@@ -14,26 +22,57 @@ pub struct LoopbackCapture {
     buffer: Vec<u8>,
 }
 
-impl LoopbackCapture {
-    pub fn open(pid: u32, sample_rate: u32, channels: u16) -> Result<Self> {
+impl WasapiCapture {
+    /// Son produit par le processus `pid` et ses sous-processus.
+    pub fn process(pid: u32, sample_rate: u32, channels: u16) -> Result<Self> {
         let _ = wasapi::initialize_mta();
-        // Flottant 32 bits : Windows convertit si besoin depuis le format du
-        // programme capturé.
-        let format = WaveFormat::new(32, 32, &SampleType::Float, sample_rate as usize, channels as usize, None);
-        let mut client = AudioClient::new_application_loopback_client(pid, true)
+        let client = AudioClient::new_application_loopback_client(pid, true)
             .with_context(|| format!("activation de la capture audio du processus {pid}"))?;
+        Self::start(client, sample_rate, channels).map_err(|e| anyhow!("initialisation de la capture audio : {e}"))
+    }
+
+    /// Son d'un micro (`None` : le micro par défaut de Windows).
+    pub fn microphone(device_id: Option<&str>, sample_rate: u32, channels: u16) -> Result<Self> {
+        let _ = wasapi::initialize_mta();
+        let enumerator = DeviceEnumerator::new().context("liste des périphériques audio")?;
+        let device = match device_id {
+            Some(id) => enumerator.get_device(id).context("micro introuvable (débranché ?)")?,
+            None => {
+                enumerator.get_default_device(&Direction::Capture).context("aucun micro par défaut dans Windows")?
+            }
+        };
+        let client = device.get_iaudioclient().context("ouverture du micro")?;
+        Self::start(client, sample_rate, channels).map_err(|e| {
+            if access_denied(&e) {
+                anyhow!(
+                    "Windows refuse l'accès au micro. Autorise-le dans Paramètres > Confidentialité et sécurité > Microphone (accès au micro, et accès pour les applications de bureau)."
+                )
+            } else {
+                anyhow!("micro inutilisable : {e}")
+            }
+        })
+    }
+
+    fn start(mut client: AudioClient, sample_rate: u32, channels: u16) -> Result<Self, WasapiError> {
+        // Flottant 32 bits : Windows convertit si besoin depuis le format de
+        // la source capturée.
+        let format = WaveFormat::new(32, 32, &SampleType::Float, sample_rate as usize, channels as usize, None);
         let mode = StreamMode::EventsShared { autoconvert: true, buffer_duration_hns: 0 };
-        client.initialize_client(&format, &Direction::Capture, &mode).context("initialisation de la capture audio")?;
-        let event = client.set_get_eventhandle().context("événement de capture audio")?;
-        let capture = client.get_audiocaptureclient().context("client de capture audio")?;
-        client.start_stream().context("démarrage de la capture audio")?;
+        client.initialize_client(&format, &Direction::Capture, &mode)?;
+        let event = client.set_get_eventhandle()?;
+        let capture = client.get_audiocaptureclient()?;
+        client.start_stream()?;
         Ok(Self { client, capture, event, frame_bytes: channels as usize * 4, buffer: Vec::new() })
     }
 }
 
-impl AudioCapture for LoopbackCapture {
+fn access_denied(error: &WasapiError) -> bool {
+    matches!(error, WasapiError::Windows(e) if e.code().0 == E_ACCESSDENIED)
+}
+
+impl AudioCapture for WasapiCapture {
     fn read(&mut self, timeout_ms: u32, out: &mut Vec<AudioPacket>) -> Result<()> {
-        // Un délai dépassé n'est pas une erreur : le programme est muet.
+        // Un délai dépassé n'est pas une erreur : la source est muette.
         let _ = self.event.wait_for_event(timeout_ms);
         loop {
             let frames = self.capture.get_next_packet_size()?.unwrap_or(0) as usize;
@@ -56,8 +95,26 @@ impl AudioCapture for LoopbackCapture {
     }
 }
 
-impl Drop for LoopbackCapture {
+impl Drop for WasapiCapture {
     fn drop(&mut self) {
         let _ = self.client.stop_stream();
     }
+}
+
+/// Micros branchés et activés.
+pub fn microphones() -> Vec<AudioDevice> {
+    let _ = wasapi::initialize_mta();
+    let list = || -> Result<Vec<AudioDevice>, WasapiError> {
+        let collection = DeviceEnumerator::new()?.get_device_collection(&Direction::Capture)?;
+        let mut devices = Vec::new();
+        for device in &collection {
+            let device = device?;
+            devices.push(AudioDevice { id: device.get_id()?, name: device.get_friendlyname()? });
+        }
+        Ok(devices)
+    };
+    list().unwrap_or_else(|e| {
+        log::warn!("liste des micros indisponible : {e}");
+        Vec::new()
+    })
 }

@@ -29,7 +29,7 @@ use polyptyque_core::platform::{BrowserInstall, Platform, WindowInfo};
 #[cfg(not(windows))]
 use polyptyque_engine::remux;
 use polyptyque_engine::resolve::{self, PrepareEvent};
-use polyptyque_engine::{probe, Session, SessionPlan, SourceState, SourceStatus, SourceSummary};
+use polyptyque_engine::{probe, MicrophonePlan, Session, SessionPlan, SourceState, SourceStatus, SourceSummary};
 use slint::{CloseRequestResponse, ComponentHandle, Image, Model, ModelRc, SharedString, Timer, TimerMode, VecModel};
 
 use crate::convert::{ConversionEvent, Converter};
@@ -111,6 +111,10 @@ pub struct App {
     joining: RefCell<HashSet<String>>,
     converter: RefCell<Option<Converter>>,
     conversion: RefCell<ConversionProgress>,
+    /// Micros proposés dans les réglages : identifiant et nom.
+    mic_choices: RefCell<Vec<(String, String)>>,
+    /// Un problème de micro a déjà été signalé pendant cet enregistrement.
+    mic_warned: Cell<bool>,
     #[cfg(windows)]
     hotkeys: RefCell<Option<polyptyque_windows::hotkeys::HotkeyListener>>,
 }
@@ -166,6 +170,8 @@ pub fn run(platform: Arc<dyn Platform>, paths: Paths, initial: Option<Config>) -
         joining: RefCell::new(HashSet::new()),
         converter: RefCell::new(None),
         conversion: RefCell::new(ConversionProgress::default()),
+        mic_choices: RefCell::new(Vec::new()),
+        mic_warned: Cell::new(false),
         #[cfg(windows)]
         hotkeys: RefCell::new(None),
     });
@@ -279,6 +285,9 @@ fn install_callbacks(ui: &AppWindow) {
     b.on_convert_files(|| {
         with_app(|a| a.convert_files());
     });
+    b.on_open_mic_privacy(|| {
+        with_app(|a| a.open_mic_privacy());
+    });
     b.on_request_cancel_conversion(|| {
         with_app(|a| a.request_cancel_conversion());
     });
@@ -373,6 +382,7 @@ impl App {
             .collect();
         let scene_name = scene.name.clone();
         let source_count = scene.sources.len();
+        let microphone = config.settings.microphone.enabled;
         drop(config);
 
         // Les aperçus et le moteur ne signalent que les changements : on garde
@@ -413,6 +423,7 @@ impl App {
             b.set_scene_name(scene_name.into());
             b.set_sources(ModelRc::new(VecModel::from(sources)));
             b.set_previews_enabled(previews);
+            b.set_mic_enabled(microphone);
             if b.get_selected_source() >= source_count as i32 {
                 b.set_selected_source(source_count as i32 - 1);
             }
@@ -655,9 +666,17 @@ impl App {
             encoder: prepared.encoder,
             ffmpeg: prepared.ffmpeg,
             log_dir: paths::logs_dir().join(format!("session_{date}_{time}")),
+            microphone: config
+                .settings
+                .microphone
+                .enabled
+                .then(|| MicrophonePlan { device_id: config.settings.microphone.device().map(str::to_string) }),
         };
         match Session::start(self.platform.clone(), plan) {
             Ok(session) => {
+                self.mic_warned.set(false);
+                let microphone = config.settings.microphone.enabled;
+                self.with_bridge(|b| b.set_mic_recording(microphone));
                 *self.session.borrow_mut() = Some(session);
                 let video = &config.settings.video;
                 let text = format!(
@@ -814,7 +833,12 @@ impl App {
 
     fn finish_stop(&self, summaries: Vec<SourceSummary>, reason: Option<String>) {
         self.set_busy("");
-        self.with_bridge(|b| b.set_recording(false));
+        self.with_bridge(|b| {
+            b.set_recording(false);
+            b.set_mic_recording(false);
+            b.set_mic_text("Micro".into());
+            b.set_mic_tone(0);
+        });
         self.refresh_all();
         self.restart_previews();
         if self.quitting.get() {
@@ -859,6 +883,9 @@ impl App {
             };
             let elapsed = format::clock(session.elapsed());
             self.with_bridge(|b| b.set_elapsed(elapsed.into()));
+            if let Some(micro) = session.microphone_status() {
+                self.show_microphone(&micro);
+            }
             session.status()
         };
         let joining = self.joining.borrow().clone();
@@ -911,6 +938,38 @@ impl App {
             });
         }
         self.refresh_disk(false);
+    }
+
+    // ----- Micro -----------------------------------------------------------
+
+    fn show_microphone(&self, status: &SourceStatus) {
+        let (text, tone) = match status.state {
+            SourceState::Connected => ("Micro", 1),
+            SourceState::Searching => ("Micro : ouverture…", 0),
+            SourceState::Lost => ("Micro indisponible", 3),
+            SourceState::Failed => ("Micro : erreur", 3),
+            SourceState::Minimized | SourceState::Finishing | SourceState::Finished => ("Micro", 0),
+        };
+        let level = format::level(status.audio_level);
+        self.with_bridge(|b| {
+            b.set_mic_text(text.into());
+            b.set_mic_tone(tone);
+            b.set_mic_level(level);
+            b.set_mic_sound(status.audio_recent);
+        });
+        // L'explication (accès refusé, micro débranché…) n'est montrée qu'une fois.
+        if tone == 3 && !self.mic_warned.get() {
+            if let Some(error) = &status.error {
+                self.mic_warned.set(true);
+                self.toast(&format!("Micro : {error}"), 3);
+            }
+        }
+    }
+
+    fn open_mic_privacy(&self) {
+        if let Err(e) = Command::new("explorer").arg("ms-settings:privacy-microphone").spawn() {
+            self.toast(&format!("Impossible d'ouvrir les paramètres de Windows : {e}"), 3);
+        }
     }
 
     // ----- Conversion MP4 --------------------------------------------------
@@ -1391,6 +1450,21 @@ impl App {
             hotkey_index(&s.hotkeys.toggle_previews),
         );
         let hotkey_choices: Vec<SharedString> = hotkey_list.into_iter().map(Into::into).collect();
+        // Micros : celui de Windows par défaut, puis ceux qui sont branchés ;
+        // un micro choisi mais débranché reste proposé.
+        let mut mics: Vec<(String, String)> = vec![(String::new(), "Micro par défaut de Windows".into())];
+        mics.extend(self.platform.list_microphones().into_iter().map(|d| (d.id, d.name)));
+        let mic = &s.microphone;
+        let mic_index = match mics.iter().position(|(id, _)| *id == mic.device_id) {
+            Some(index) => index,
+            None => {
+                mics.push((mic.device_id.clone(), format!("{} (débranché)", mic.device_name)));
+                mics.len() - 1
+            }
+        };
+        let mic_enabled = mic.enabled;
+        let mic_labels: Vec<SharedString> = mics.iter().map(|(_, name)| name.as_str().into()).collect();
+        *self.mic_choices.borrow_mut() = mics;
         drop(config);
         self.with_bridge(|b| {
             b.set_resolution_choices(ModelRc::new(VecModel::from(values.0)));
@@ -1413,6 +1487,9 @@ impl App {
             b.set_template(values.9.into());
             b.set_settings_previews(values.10);
             b.set_settings_convert(values.11);
+            b.set_settings_mic(mic_enabled);
+            b.set_mic_choices(ModelRc::new(VecModel::from(mic_labels)));
+            b.set_mic_index(mic_index as i32);
             b.set_hotkey_choices(ModelRc::new(VecModel::from(hotkey_choices)));
             b.set_hotkey_record_index(values.12);
             b.set_hotkey_show_index(values.13);
@@ -1501,6 +1578,13 @@ impl App {
             s.previews = b.get_settings_previews();
             previews_after = s.previews;
             s.convert_to_mp4 = b.get_settings_convert();
+            s.microphone.enabled = b.get_settings_mic();
+            if let Some((id, name)) = self.mic_choices.borrow().get(b.get_mic_index().max(0) as usize) {
+                if *id != s.microphone.device_id {
+                    s.microphone.device_id = id.clone();
+                    s.microphone.device_name = if id.is_empty() { String::new() } else { name.clone() };
+                }
+            }
             let [record, show, previews] = chosen;
             s.hotkeys.toggle_recording = record;
             s.hotkeys.show_window = show;

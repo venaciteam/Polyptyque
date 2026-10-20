@@ -19,7 +19,9 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 use crossbeam_channel::Receiver;
 use polyptyque_core::config::{CHANNELS, SAMPLE_RATE};
-use polyptyque_core::encoder::{recording_args, EncoderChoice, RecordingSpec};
+use polyptyque_core::encoder::{
+    audio_recording_args, recording_args, AudioRecordingSpec, EncoderChoice, RecordingSpec,
+};
 use polyptyque_core::naming;
 use polyptyque_core::platform::{Nv12Frame, Platform};
 
@@ -41,6 +43,8 @@ const MAX_QUICK_FAILURES: u32 = 3;
 const SUPERVISION_INTERVAL: Duration = Duration::from_millis(100);
 
 pub(crate) struct OutputPlan {
+    /// Image et son, ou son seul (micro).
+    pub video: bool,
     pub ffmpeg: PathBuf,
     pub encoder: EncoderChoice,
     pub width: u32,
@@ -62,7 +66,8 @@ pub(crate) struct OutputTask {
     pub platform: Arc<dyn Platform>,
     pub plan: OutputPlan,
     pub shared: Arc<Shared>,
-    pub video: Receiver<Nv12Frame>,
+    /// Images à encoder (aucune pour un fichier de son seul).
+    pub video: Option<Receiver<Nv12Frame>>,
     pub audio: Receiver<Vec<u8>>,
 }
 
@@ -82,12 +87,21 @@ impl OutputTask {
             let output = if part == 1 { plan.first_output.clone() } else { part_path(&plan.first_output, part) };
             let (video_start, audio_start) = if part == 1 {
                 (0, 0)
-            } else {
+            } else if plan.video {
                 resume_positions(
                     shared.video_position.load(Ordering::SeqCst),
                     shared.audio_position.load(Ordering::SeqCst),
                     plan.fps,
                 )
+            } else {
+                // Son seul : il reprend là où il en est.
+                let frame_bytes = CHANNELS as u64 * 4;
+                (0, shared.audio_position.load(Ordering::SeqCst).div_ceil(frame_bytes) * frame_bytes)
+            };
+            let resume_seconds = if plan.video {
+                video_start / plan.fps.max(1) as u64
+            } else {
+                audio_start / (CHANNELS as u64 * 4) / SAMPLE_RATE as u64
             };
             shared.part.store(part, Ordering::Relaxed);
             shared.push_output(output.clone());
@@ -96,22 +110,13 @@ impl OutputTask {
                     "[{}] partie {part} : {} (reprise à {} de l'enregistrement de cette source)",
                     plan.title,
                     output.display(),
-                    clock(video_start, plan.fps)
+                    clock(resume_seconds)
                 );
             }
 
             let started = Instant::now();
-            let end = match Part::start(
-                platform.as_ref(),
-                &plan,
-                &shared,
-                &output,
-                part,
-                &video,
-                &audio,
-                video_start,
-                audio_start,
-            ) {
+            let streams = Streams { video: video.as_ref(), audio: &audio, video_start, audio_start, resume_seconds };
+            let end = match Part::start(platform.as_ref(), &plan, &shared, &output, part, streams) {
                 Ok(running) => running.supervise(&shared, &plan.log),
                 Err(e) => PartEnd::Crashed(format!("démarrage de l'encodeur impossible : {e:#}")),
             };
@@ -152,7 +157,17 @@ fn stopping(shared: &Shared) -> bool {
     shared.stop_at().is_some() || shared.capture_abandoned()
 }
 
-/// Une partie de fichier en cours : FFmpeg et ses deux fils d'écriture.
+/// Flux à brancher sur une nouvelle partie, et point de reprise.
+struct Streams<'a> {
+    video: Option<&'a Receiver<Nv12Frame>>,
+    audio: &'a Receiver<Vec<u8>>,
+    video_start: u64,
+    audio_start: u64,
+    /// Position de la reprise depuis le départ de la source, en secondes.
+    resume_seconds: u64,
+}
+
+/// Une partie de fichier en cours : FFmpeg et ses fils d'écriture.
 struct Part {
     child: Child,
     writers: Vec<(JoinHandle<()>, String)>,
@@ -160,42 +175,54 @@ struct Part {
 }
 
 impl Part {
-    #[allow(clippy::too_many_arguments)]
     fn start(
         platform: &dyn Platform,
         plan: &OutputPlan,
         shared: &Arc<Shared>,
         output: &Path,
         part: u32,
-        video: &Receiver<Nv12Frame>,
-        audio: &Receiver<Vec<u8>>,
-        video_start: u64,
-        audio_start: u64,
+        streams: Streams,
     ) -> Result<Part> {
         let prefix = format!("{}-p{part}", plan.pipe_prefix);
-        let video_pipe = platform.create_stream_pipe(&format!("{prefix}-video"))?;
         let audio_pipe = platform.create_stream_pipe(&format!("{prefix}-audio"))?;
-        let video_path = video_pipe.ffmpeg_path();
         let audio_path = audio_pipe.ffmpeg_path();
+        let video = match streams.video {
+            Some(queue) => {
+                let pipe = platform.create_stream_pipe(&format!("{prefix}-video"))?;
+                let path = pipe.ffmpeg_path();
+                Some((pipe, path, queue))
+            }
+            None => None,
+        };
         let title = if part == 1 {
             plan.title.clone()
         } else {
-            format!("{} · partie {part} (reprise à {})", plan.title, clock(video_start, plan.fps))
+            format!("{} · partie {part} (reprise à {})", plan.title, clock(streams.resume_seconds))
         };
-        let args = recording_args(&RecordingSpec {
-            video_input: &video_path,
-            audio_input: &audio_path,
-            width: plan.width,
-            height: plan.height,
-            fps: plan.fps,
-            sample_rate: SAMPLE_RATE,
-            channels: CHANNELS,
-            encoder: plan.encoder,
-            video_bitrate_kbps: plan.video_bitrate_kbps,
-            audio_bitrate_kbps: plan.audio_bitrate_kbps,
-            title: &title,
-            output,
-        });
+        let args = match &video {
+            Some((_, video_path, _)) => recording_args(&RecordingSpec {
+                video_input: video_path,
+                audio_input: &audio_path,
+                width: plan.width,
+                height: plan.height,
+                fps: plan.fps,
+                sample_rate: SAMPLE_RATE,
+                channels: CHANNELS,
+                encoder: plan.encoder,
+                video_bitrate_kbps: plan.video_bitrate_kbps,
+                audio_bitrate_kbps: plan.audio_bitrate_kbps,
+                title: &title,
+                output,
+            }),
+            None => audio_recording_args(&AudioRecordingSpec {
+                input: &audio_path,
+                sample_rate: SAMPLE_RATE,
+                channels: CHANNELS,
+                bitrate_kbps: plan.audio_bitrate_kbps,
+                title: &title,
+                output,
+            }),
+        };
 
         let mut log = OpenOptions::new()
             .create(true)
@@ -207,44 +234,39 @@ impl Part {
         let mut command = Command::new(&plan.ffmpeg);
         command.args(&args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::from(log));
         platform.prepare_encoder_process(&mut command);
-        let mut child = command.spawn().with_context(|| format!("lancement de {}", plan.ffmpeg.display()))?;
+        let child = command.spawn().with_context(|| format!("lancement de {}", plan.ffmpeg.display()))?;
 
-        let control = Arc::new(PartControl::default());
-        let video_writer = writer::spawn(
-            WriterJob {
-                thread_name: format!("{}-video-pipe", plan.title),
-                pipe: video_pipe,
-                queue: video.clone(),
-                position: shared.video_position.clone(),
-                start_at: video_start,
-                label: "image",
-            },
-            shared.clone(),
-            control.clone(),
-        );
-        let audio_writer = video_writer.and_then(|video_writer| {
-            writer::spawn(
-                WriterJob {
-                    thread_name: format!("{}-audio-pipe", plan.title),
-                    pipe: audio_pipe,
-                    queue: audio.clone(),
-                    position: shared.audio_position.clone(),
-                    start_at: audio_start,
-                    label: "son",
-                },
-                shared.clone(),
-                control.clone(),
-            )
-            .map(|audio_writer| vec![(video_writer, video_path), (audio_writer, audio_path)])
-        });
-        match audio_writer {
-            Ok(writers) => Ok(Part { child, writers, control }),
-            Err(e) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                Err(e.into())
+        let mut running = Part { child, writers: Vec::new(), control: Arc::new(PartControl::default()) };
+        let spawn_all = || -> std::io::Result<()> {
+            if let Some((pipe, path, queue)) = video {
+                let job = WriterJob {
+                    thread_name: format!("{}-video-pipe", plan.title),
+                    pipe,
+                    queue: queue.clone(),
+                    position: shared.video_position.clone(),
+                    start_at: streams.video_start,
+                    label: "image",
+                };
+                running.writers.push((writer::spawn(job, shared.clone(), running.control.clone())?, path));
             }
+            let job = WriterJob {
+                thread_name: format!("{}-audio-pipe", plan.title),
+                pipe: audio_pipe,
+                queue: streams.audio.clone(),
+                position: shared.audio_position.clone(),
+                start_at: streams.audio_start,
+                label: "son",
+            };
+            running.writers.push((writer::spawn(job, shared.clone(), running.control.clone())?, audio_path));
+            Ok(())
+        };
+        if let Err(e) = spawn_all() {
+            let _ = running.child.kill();
+            let _ = running.child.wait();
+            running.abandon_writers();
+            return Err(e.into());
         }
+        Ok(running)
     }
 
     /// Veille sur la partie jusqu'à la fermeture normale du fichier ou
@@ -350,8 +372,7 @@ fn resume_positions(video_frames: u64, audio_bytes: u64, fps: u32) -> (u64, u64)
     (start_frame, start_sample * frame_bytes)
 }
 
-fn clock(frames: u64, fps: u32) -> String {
-    let seconds = frames / fps.max(1) as u64;
+fn clock(seconds: u64) -> String {
     format!("{:02}:{:02}:{:02}", seconds / 3600, seconds / 60 % 60, seconds % 60)
 }
 
@@ -412,7 +433,7 @@ mod tests {
 
     #[test]
     fn clock_format() {
-        assert_eq!(clock(60 * 3723, 60), "01:02:03");
+        assert_eq!(clock(3723), "01:02:03");
     }
 
     #[test]

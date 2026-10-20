@@ -242,6 +242,7 @@ pub struct Settings {
     pub convert_to_mp4: bool,
     pub video: VideoSettings,
     pub audio: AudioSettings,
+    pub microphone: MicrophoneSettings,
     pub hotkeys: HotkeySettings,
 }
 
@@ -254,6 +255,7 @@ impl Default for Settings {
             convert_to_mp4: false,
             video: VideoSettings::default(),
             audio: AudioSettings::default(),
+            microphone: MicrophoneSettings::default(),
             hotkeys: HotkeySettings::default(),
         }
     }
@@ -365,6 +367,33 @@ impl Default for AudioSettings {
 impl AudioSettings {
     pub fn normalize(&mut self) {
         self.bitrate_kbps = self.bitrate_kbps.clamp(64, 512);
+    }
+}
+
+/// Micro enregistré dans un fichier séparé. Désactivé par défaut : il
+/// faut le choisir explicitement.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct MicrophoneSettings {
+    pub enabled: bool,
+    /// Identifiant du périphérique ; vide pour le micro par défaut de Windows.
+    pub device_id: String,
+    /// Nom affiché du périphérique choisi (pour le reconnaître s'il est
+    /// débranché).
+    pub device_name: String,
+}
+
+impl MicrophoneSettings {
+    pub fn device(&self) -> Option<&str> {
+        Some(self.device_id.as_str()).filter(|id| !id.is_empty())
+    }
+
+    pub fn label(&self) -> &str {
+        if self.device_id.is_empty() || self.device_name.is_empty() {
+            "micro par défaut"
+        } else {
+            &self.device_name
+        }
     }
 }
 

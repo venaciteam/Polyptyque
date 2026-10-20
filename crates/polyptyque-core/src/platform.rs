@@ -22,6 +22,13 @@ pub struct WindowInfo {
     pub exe: PathBuf,
 }
 
+/// Périphérique d'entrée audio (micro).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AudioDevice {
+    pub id: String,
+    pub name: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct BrowserInstall {
     pub name: String,
@@ -86,6 +93,18 @@ pub trait Platform: Send + Sync {
     /// Son produit par le processus `pid` et ses sous-processus. À appeler
     /// sur le fil qui utilisera la capture.
     fn open_audio_capture(&self, pid: u32, sample_rate: u32, channels: u16) -> anyhow::Result<Box<dyn AudioCapture>>;
+
+    /// Micros disponibles.
+    fn list_microphones(&self) -> Vec<AudioDevice>;
+
+    /// Son d'un micro (`None` : celui choisi par défaut dans Windows). À
+    /// appeler sur le fil qui utilisera la capture.
+    fn open_microphone_capture(
+        &self,
+        device_id: Option<&str>,
+        sample_rate: u32,
+        channels: u16,
+    ) -> anyhow::Result<Box<dyn AudioCapture>>;
 
     fn create_stream_pipe(&self, name: &str) -> anyhow::Result<Box<dyn StreamPipe>>;
 

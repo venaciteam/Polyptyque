@@ -3,7 +3,7 @@
 import { ListView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import { Bridge, SceneItem, SourceItem, SourceCard, WindowItem } from "bridge.slint";
-import { ActionButton, IconButton, ListRow, Panel, SourceCardView, Toggle } from "components.slint";
+import { ActionButton, IconButton, LevelMeter, ListRow, Panel, SourceCardView, Toggle } from "components.slint";
 import {
     AddApplicationSheet, AddBrowserSheet, BusyOverlay, ConfirmSheet, SceneNameSheet, SettingsSheet, Toast,
 } from "sheets.slint";
@@ -56,6 +56,44 @@ component StatusPill inherits Rectangle {
             font-weight: 700;
             font-size: Theme.font-normal;
             vertical-alignment: center;
+        }
+    }
+}
+
+// Micro activé : son état et son niveau pendant l'enregistrement.
+component MicPill inherits Rectangle {
+    height: 30px;
+    width: row.preferred-width;
+    border-radius: 15px;
+    background: Theme.surface-raised;
+    border-width: 1px;
+    border-color: Bridge.mic-tone >= 2 ? Theme.tone-color(Bridge.mic-tone).with-alpha(0.6) : Theme.border;
+    accessible-role: text;
+    accessible-label: Bridge.mic-text;
+
+    row := HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 14px;
+        spacing: 8px;
+        Image {
+            source: @image-url("icons/mic.svg");
+            width: 14px;
+            height: 14px;
+            y: (parent.height - self.height) / 2;
+            colorize: Bridge.mic-recording && Bridge.mic-sound ? Theme.ok : Theme.tone-color(Bridge.mic-tone);
+        }
+        Text {
+            text: Bridge.mic-text;
+            color: Theme.text;
+            font-size: Theme.font-small;
+            font-weight: 600;
+            vertical-alignment: center;
+        }
+        if Bridge.mic-recording: LevelMeter {
+            width: 44px;
+            y: (parent.height - self.height) / 2;
+            level: Bridge.mic-level;
+            active: Bridge.mic-sound;
         }
     }
 }
@@ -144,6 +182,9 @@ component TopBar inherits HorizontalLayout {
         vertical-alignment: center;
         overflow: elide;
         min-width: 0;
+    }
+    if Bridge.mic-enabled: MicPill {
+        y: (parent.height - self.height) / 2;
     }
     if Bridge.converting: ConversionPill {
         y: (parent.height - self.height) / 2;

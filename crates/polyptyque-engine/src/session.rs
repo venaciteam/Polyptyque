@@ -17,7 +17,7 @@ use polyptyque_core::naming::{self, NameParts};
 use polyptyque_core::platform::{Nv12Frame, Platform};
 use polyptyque_core::timeline::HNS_PER_SEC;
 
-use crate::audio_task::AudioTask;
+use crate::audio_task::{AudioInput, AudioTask};
 use crate::output::{OutputPlan, OutputTask};
 use crate::shared::{Shared, SourceState};
 use crate::video_task::VideoTask;
@@ -36,6 +36,24 @@ pub struct SessionPlan {
     pub ffmpeg: PathBuf,
     /// Dossier des journaux de cette session.
     pub log_dir: PathBuf,
+    /// Micro enregistré dans un fichier séparé, pendant toute la session.
+    pub microphone: Option<MicrophonePlan>,
+}
+
+pub struct MicrophonePlan {
+    /// Périphérique (`None` : le micro par défaut de Windows).
+    pub device_id: Option<String>,
+}
+
+/// Identifiant de la piste du micro dans les états et les bilans.
+pub const MICROPHONE_ID: &str = "micro";
+
+/// Ce que capture une exécution.
+enum Capture<'a> {
+    /// Une fenêtre et le son de son programme.
+    Window(&'a Source),
+    /// Un micro seul.
+    Microphone(Option<String>),
 }
 
 #[derive(Debug, Clone)]
@@ -126,6 +144,27 @@ impl SourceRuntime {
         }
     }
 
+    fn status(&self, now: u64, fps: f32) -> SourceStatus {
+        let shared = &self.shared;
+        let outputs = shared.outputs();
+        let last_sound = shared.audio_last_sound_hns.load(Ordering::Relaxed);
+        SourceStatus {
+            id: self.id.clone(),
+            name: self.name.clone(),
+            state: shared.state(),
+            frames_total: shared.frames_total.load(Ordering::Relaxed),
+            frames_new: shared.frames_new.load(Ordering::Relaxed),
+            frames_dropped: shared.frames_dropped.load(Ordering::Relaxed),
+            audio_level: shared.take_peak(),
+            audio_recent: last_sound != 0 && now.saturating_sub(last_sound) < RECENT_SOUND_HNS,
+            backlog_seconds: shared.video_backlog.load(Ordering::Relaxed) as f32 / fps,
+            part: shared.part.load(Ordering::Relaxed),
+            output: outputs.last().cloned().unwrap_or_default(),
+            file_size: total_size(&outputs),
+            error: shared.error(),
+        }
+    }
+
     fn summary(&self) -> SourceSummary {
         let outputs = self.shared.outputs();
         SourceSummary {
@@ -154,6 +193,7 @@ pub struct Session {
     /// relancée en a plusieurs : les précédentes sont dans `retired`).
     sources: Vec<SourceRuntime>,
     retired: Vec<SourceRuntime>,
+    microphone: Option<SourceRuntime>,
     started_count: usize,
     taken: HashSet<PathBuf>,
     t0_hns: u64,
@@ -179,6 +219,7 @@ impl Session {
             log_dir: plan.log_dir,
             sources: Vec::new(),
             retired: Vec::new(),
+            microphone: None,
             started_count: 0,
             taken: HashSet::new(),
             t0_hns,
@@ -188,6 +229,17 @@ impl Session {
         let (date, time) = naming::now_parts();
         for source in &plan.sources {
             session.launch(source, t0_hns, &date, &time);
+        }
+        if let Some(microphone) = plan.microphone {
+            let runtime = session.spawn_runtime(
+                MICROPHONE_ID,
+                "Micro",
+                Capture::Microphone(microphone.device_id),
+                t0_hns,
+                &date,
+                &time,
+            );
+            session.microphone = Some(runtime);
         }
         Ok(session)
     }
@@ -227,24 +279,47 @@ impl Session {
     }
 
     fn launch(&mut self, source: &Source, origin_hns: u64, date: &str, time: &str) {
+        let runtime = self.spawn_runtime(&source.id, &source.name, Capture::Window(source), origin_hns, date, time);
+        if let Some(index) = self.sources.iter().position(|s| s.id == runtime.id) {
+            let previous = std::mem::replace(&mut self.sources[index], runtime);
+            self.retired.push(previous);
+        } else {
+            self.sources.push(runtime);
+        }
+    }
+
+    /// Démarre la capture, l'encodage et le fichier d'une source (ou du
+    /// micro), avec `origin_hns` pour origine des temps.
+    fn spawn_runtime(
+        &mut self,
+        id: &str,
+        name: &str,
+        capture: Capture,
+        origin_hns: u64,
+        date: &str,
+        time: &str,
+    ) -> SourceRuntime {
         let settings = &self.settings;
+        let video = &settings.video;
+        let has_video = matches!(capture, Capture::Window(_));
         let order = self.started_count;
         self.started_count += 1;
         let stem = naming::render(
             &settings.filename_template,
-            &NameParts { date, time, scene: &self.scene_name, source: &source.name },
+            &NameParts { date, time, scene: &self.scene_name, source: name },
         );
-        let output = naming::unique_path(&settings.output_dir, &stem, "mkv", &self.taken);
+        let output =
+            naming::unique_path(&settings.output_dir, &stem, if has_video { "mkv" } else { "mka" }, &self.taken);
         self.taken.insert(output.clone());
-        let log = self.log_dir.join(format!("{:02}-{}.ffmpeg.log", order + 1, naming::sanitize(&source.name)));
+        let log = self.log_dir.join(format!("{:02}-{}.ffmpeg.log", order + 1, naming::sanitize(name)));
         let shared = Arc::new(Shared::new());
         let (video_tx, video_rx) = unbounded::<Nv12Frame>();
         let (audio_tx, audio_rx) = unbounded::<Vec<u8>>();
-        let video = &settings.video;
 
         let output_task = OutputTask {
             platform: self.platform.clone(),
             plan: OutputPlan {
+                video: has_video,
                 ffmpeg: self.ffmpeg.clone(),
                 encoder: self.encoder,
                 width: video.width,
@@ -252,67 +327,65 @@ impl Session {
                 fps: video.fps,
                 video_bitrate_kbps: video.bitrate_kbps,
                 audio_bitrate_kbps: settings.audio.bitrate_kbps,
-                title: source.name.clone(),
+                title: name.to_string(),
                 first_output: output.clone(),
                 log: log.clone(),
                 pipe_prefix: format!("{}-{order}", self.tag),
             },
             shared: shared.clone(),
-            video: video_rx,
+            video: has_video.then_some(video_rx),
             audio: audio_rx,
         };
         let mut runtime = SourceRuntime {
             order,
-            id: source.id.clone(),
-            name: source.name.clone(),
+            id: id.to_string(),
+            name: name.to_string(),
             log,
             shared: shared.clone(),
             capture_threads: Vec::new(),
             output_thread: None,
             finisher: None,
         };
-        match thread::Builder::new().name(format!("{}-encodage", source.name)).spawn(move || output_task.run()) {
+        match thread::Builder::new().name(format!("{name}-encodage")).spawn(move || output_task.run()) {
             Ok(handle) => runtime.output_thread = Some(handle),
             Err(e) => shared.fail(format!("fil d'encodage : {e}")),
         }
         if !shared.has_failed() {
-            let video_task = VideoTask {
-                platform: self.platform.clone(),
-                source: source.clone(),
-                shared: shared.clone(),
-                queue: video_tx,
-                t0_hns: origin_hns,
-                width: video.width,
-                height: video.height,
-                fps: video.fps,
+            let input = match capture {
+                Capture::Window(source) => {
+                    let video_task = VideoTask {
+                        platform: self.platform.clone(),
+                        source: source.clone(),
+                        shared: shared.clone(),
+                        queue: video_tx,
+                        t0_hns: origin_hns,
+                        width: video.width,
+                        height: video.height,
+                        fps: video.fps,
+                    };
+                    match thread::Builder::new().name(format!("{name}-video")).spawn(move || video_task.run()) {
+                        Ok(handle) => runtime.capture_threads.push(handle),
+                        Err(e) => shared.fail(format!("fil vidéo : {e}")),
+                    }
+                    AudioInput::Window
+                }
+                Capture::Microphone(device) => AudioInput::Microphone(device),
             };
             let audio_task = AudioTask {
                 platform: self.platform.clone(),
-                name: source.name.clone(),
+                name: name.to_string(),
+                input,
                 shared: shared.clone(),
                 queue: audio_tx,
                 t0_hns: origin_hns,
             };
-            for (suffix, spawned) in [
-                (
-                    "vidéo",
-                    thread::Builder::new().name(format!("{}-video", source.name)).spawn(move || video_task.run()),
-                ),
-                ("son", thread::Builder::new().name(format!("{}-audio", source.name)).spawn(move || audio_task.run())),
-            ] {
-                match spawned {
-                    Ok(handle) => runtime.capture_threads.push(handle),
-                    Err(e) => shared.fail(format!("fil {suffix} : {e}")),
-                }
+            match thread::Builder::new().name(format!("{name}-audio")).spawn(move || audio_task.run()) {
+                Ok(handle) => runtime.capture_threads.push(handle),
+                Err(e) => shared.fail(format!("fil son : {e}")),
             }
         }
-        log::info!("[{}] enregistrement vers {}", runtime.name, output.display());
-        if let Some(index) = self.sources.iter().position(|s| s.id == runtime.id) {
-            let previous = std::mem::replace(&mut self.sources[index], runtime);
-            self.retired.push(previous);
-        } else {
-            self.sources.push(runtime);
-        }
+        log::info!("[{name}] enregistrement vers {}", output.display());
+        runtime
     }
 
     pub fn elapsed(&self) -> Duration {
@@ -327,10 +400,12 @@ impl Session {
         &self.settings.output_dir
     }
 
-    /// Débit total estimé des sources qui enregistrent, en octets par heure.
+    /// Débit total estimé des sources qui enregistrent (micro compris), en
+    /// octets par heure.
     pub fn bytes_per_hour(&self) -> u64 {
-        bytes_per_hour(self.settings.video.bitrate_kbps, self.settings.audio.bitrate_kbps)
-            * self.recording_count() as u64
+        let audio = self.settings.audio.bitrate_kbps;
+        let microphone = if self.microphone.is_some() { bytes_per_hour(0, audio) } else { 0 };
+        bytes_per_hour(self.settings.video.bitrate_kbps, audio) * self.recording_count() as u64 + microphone
     }
 
     pub fn free_space(&self) -> Option<u64> {
@@ -340,29 +415,13 @@ impl Session {
     pub fn status(&mut self) -> Vec<SourceStatus> {
         let now = self.platform.now_hns();
         let fps = self.settings.video.fps.max(1) as f32;
-        self.sources
-            .iter()
-            .map(|source| {
-                let shared = &source.shared;
-                let outputs = shared.outputs();
-                let last_sound = shared.audio_last_sound_hns.load(Ordering::Relaxed);
-                SourceStatus {
-                    id: source.id.clone(),
-                    name: source.name.clone(),
-                    state: shared.state(),
-                    frames_total: shared.frames_total.load(Ordering::Relaxed),
-                    frames_new: shared.frames_new.load(Ordering::Relaxed),
-                    frames_dropped: shared.frames_dropped.load(Ordering::Relaxed),
-                    audio_level: shared.take_peak(),
-                    audio_recent: last_sound != 0 && now.saturating_sub(last_sound) < RECENT_SOUND_HNS,
-                    backlog_seconds: shared.video_backlog.load(Ordering::Relaxed) as f32 / fps,
-                    part: shared.part.load(Ordering::Relaxed),
-                    output: outputs.last().cloned().unwrap_or_default(),
-                    file_size: total_size(&outputs),
-                    error: shared.error(),
-                }
-            })
-            .collect()
+        self.sources.iter().map(|source| source.status(now, fps)).collect()
+    }
+
+    /// État du micro, s'il est enregistré.
+    pub fn microphone_status(&self) -> Option<SourceStatus> {
+        let now = self.platform.now_hns();
+        self.microphone.as_ref().map(|micro| micro.status(now, 1.0))
     }
 
     /// Arrête toutes les sources au même instant et attend que chaque
@@ -370,17 +429,18 @@ impl Session {
     /// une à une auparavant).
     pub fn stop(mut self) -> Vec<SourceSummary> {
         let stop_at = self.platform.now_hns();
-        for source in &mut self.sources {
+        for source in self.sources.iter_mut().chain(self.microphone.iter_mut()) {
             source.begin_stop(stop_at);
         }
-        for source in self.sources.iter_mut().chain(self.retired.iter_mut()) {
+        for source in self.sources.iter_mut().chain(self.retired.iter_mut()).chain(self.microphone.iter_mut()) {
             if let Some(finisher) = source.finisher.take() {
                 let _ = finisher.join();
             }
         }
         self.platform.end_recording_session();
 
-        let mut all: Vec<&SourceRuntime> = self.sources.iter().chain(self.retired.iter()).collect();
+        let mut all: Vec<&SourceRuntime> =
+            self.sources.iter().chain(self.retired.iter()).chain(self.microphone.iter()).collect();
         all.sort_by_key(|s| s.order);
         all.into_iter().map(SourceRuntime::summary).collect()
     }

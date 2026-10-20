@@ -14,7 +14,7 @@ use polyptyque_core::naming;
 use polyptyque_core::paths;
 use polyptyque_core::platform::Platform;
 use polyptyque_engine::resolve::{self, PrepareEvent};
-use polyptyque_engine::{probe, Session, SessionPlan, SourceState, SourceStatus};
+use polyptyque_engine::{probe, MicrophonePlan, Session, SessionPlan, SourceState, SourceStatus};
 
 use crate::app::{RECORDING, STOP_REQUESTED};
 use crate::{convert, keys, ui};
@@ -88,6 +88,10 @@ pub fn run(platform: &Arc<dyn Platform>, config: &Config) -> Result<()> {
         encoder,
         ffmpeg,
         log_dir: log_dir.clone(),
+        microphone: settings
+            .microphone
+            .enabled
+            .then(|| MicrophonePlan { device_id: settings.microphone.device().map(str::to_string) }),
     };
     let session = match Session::start(platform.clone(), plan) {
         Ok(session) => session,

@@ -199,6 +199,12 @@ mod tests {
         fn open_audio_capture(&self, _: u32, _: u32, _: u16) -> Result<Box<dyn AudioCapture>> {
             unimplemented!()
         }
+        fn list_microphones(&self) -> Vec<AudioDevice> {
+            vec![]
+        }
+        fn open_microphone_capture(&self, _: Option<&str>, _: u32, _: u16) -> Result<Box<dyn AudioCapture>> {
+            unimplemented!()
+        }
         fn create_stream_pipe(&self, _: &str) -> Result<Box<dyn StreamPipe>> {
             unimplemented!()
         }

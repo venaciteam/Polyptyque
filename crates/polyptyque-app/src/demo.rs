@@ -170,6 +170,22 @@ impl Platform for DemoPlatform {
         }))
     }
 
+    fn list_microphones(&self) -> Vec<AudioDevice> {
+        vec![
+            AudioDevice { id: "demo-usb".into(), name: "Micro USB de démonstration".into() },
+            AudioDevice { id: "demo-casque".into(), name: "Micro du casque".into() },
+        ]
+    }
+
+    fn open_microphone_capture(
+        &self,
+        _: Option<&str>,
+        sample_rate: u32,
+        channels: u16,
+    ) -> Result<Box<dyn AudioCapture>> {
+        Ok(Box::new(DemoAudio { start: self.start, sample_rate, channels, pitch: 330.0, next_frame: None, phase: 0.0 }))
+    }
+
     fn create_stream_pipe(&self, name: &str) -> Result<Box<dyn StreamPipe>> {
         let path = self.root.join("tubes").join(name);
         let status = Command::new("mkfifo").arg(&path).status()?;

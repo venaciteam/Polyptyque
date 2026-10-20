@@ -69,7 +69,7 @@ pub fn run() -> Result<()> {
             3 => sources::open_browsers(platform.as_ref(), &config),
             4 => sources::remove(&mut config),
             5 => scenes::menu(&mut config),
-            6 => settings::menu(&mut config),
+            6 => settings::menu(platform.as_ref(), &mut config),
             7 => open_output_dir(&config),
             8 => convert::menu(&platform, &config),
             _ => break,

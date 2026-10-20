@@ -57,6 +57,15 @@ export global Bridge {
     in property <bool> previews-enabled: true;
     in property <string> version;
 
+    // Micro (fichier séparé) : activé dans les réglages, et son état
+    // pendant l'enregistrement.
+    in property <bool> mic-enabled;
+    in property <bool> mic-recording;
+    in property <string> mic-text: "Micro";
+    in property <int> mic-tone;
+    in property <float> mic-level;
+    in property <bool> mic-sound;
+
     // Conversion MP4 en cours.
     in property <bool> converting;
     in property <string> conversion-text;
@@ -114,6 +123,9 @@ export global Bridge {
     in-out property <string> template;
     in-out property <bool> settings-previews;
     in-out property <bool> settings-convert;
+    in-out property <bool> settings-mic;
+    in property <[string]> mic-choices;
+    in-out property <int> mic-index;
     in property <[string]> hotkey-choices;
     in-out property <int> hotkey-record-index;
     in-out property <int> hotkey-show-index;
@@ -145,6 +157,7 @@ export global Bridge {
     callback open-output-folder();
     callback toggle-previews();
     callback convert-files();
+    callback open-mic-privacy();
     callback request-cancel-conversion();
     callback close-sheet();
     callback confirm-accepted();
