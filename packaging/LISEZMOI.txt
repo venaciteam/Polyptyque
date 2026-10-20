@@ -1,14 +1,16 @@
-POLYPTYQUE - PROTOTYPE (ÉTAPE 0)
-================================
+POLYPTYQUE - VERSION D'ESSAI
+============================
 
-Ce dossier contient une version d'essai du moteur d'enregistrement de
-Polyptyque, sans interface graphique : tout se fait dans une fenêtre de
-texte, avec les flèches du clavier et la touche Entrée.
+Polyptyque enregistre plusieurs fenêtres en même temps, chacune dans son
+propre fichier, avec uniquement le son de cette fenêtre.
 
 Contenu
 -------
-- polyptyque.exe : le prototype
-- ffmpeg.exe     : l'encodeur vidéo utilisé par Polyptyque (doit rester à côté)
+- polyptyque.exe         : Polyptyque, avec son interface
+- polyptyque-console.exe : la version en console de l'étape 0 (mêmes
+                           réglages, mêmes scènes)
+- ffmpeg.exe             : l'encodeur vidéo utilisé par Polyptyque (doit
+                           rester à côté)
 - LICENSE.txt    : licence de Polyptyque (GPL v3)
 - FFMPEG-LICENSE.txt : licence de FFmpeg
 
@@ -27,14 +29,20 @@ complémentaires », puis « Exécuter quand même ».
 Utilisation
 -----------
 1. Lancer polyptyque.exe.
-2. « Ajouter une source navigateur » : choisir le navigateur, un nom, une
-   adresse. Polyptyque ouvre ce navigateur avec un profil qui lui est propre :
+2. Sources → « Navigateur » : choisir le navigateur, un nom, une adresse.
+   Polyptyque ouvre ce navigateur avec un profil qui lui est propre :
    s'y connecter, préparer ses onglets. Connexions et onglets sont conservés.
    Tout son joué dans ce profil sera enregistré dans le fichier de la source.
-3. « Ajouter une source application » : choisir une fenêtre ouverte
-   (Discord, jeu, Tor Browser…).
+3. Sources → « Application » : choisir une fenêtre ouverte (Discord, jeu,
+   Tor Browser…).
 4. « Démarrer l'enregistrement ». Polyptyque retrouve ou rouvre les fenêtres,
-   puis affiche le suivi en direct. Q ou Échap pour arrêter.
+   puis affiche l'état de chaque source. « Arrêter » finalise les fichiers.
+
+Raccourcis clavier (modifiables dans les réglages, actifs même quand
+Polyptyque est en arrière-plan) :
+- Ctrl+Maj+F9  : démarrer ou arrêter l'enregistrement
+- Ctrl+Maj+F10 : afficher ou réduire Polyptyque
+- Ctrl+Maj+F11 : activer ou couper les aperçus
 
 Les fichiers sont dans le dossier Vidéos\Polyptyque (modifiable dans les
 réglages), un fichier MKV par source.
@@ -46,9 +54,8 @@ réglages), un fichier MKV par source.
 - Si une fenêtre se ferme pendant l'enregistrement, l'image devient noire et
   la source est rattachée automatiquement dès que la fenêtre revient.
 - La mise en veille est bloquée pendant l'enregistrement.
-- Pour arrêter, utiliser Q ou Échap. Fermer la fenêtre de Polyptyque
-  pendant un enregistrement ferme quand même les fichiers proprement, mais
-  la dernière seconde et le récapitulatif sont perdus.
+- Fermer Polyptyque pendant un enregistrement demande une confirmation,
+  puis finalise les fichiers avant de quitter.
 
 En cas de problème
 ------------------

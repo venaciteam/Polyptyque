@@ -23,6 +23,30 @@ pub fn fit_rect(src_w: u32, src_h: u32, dst_w: u32, dst_h: u32) -> (u32, u32, u3
     (x, y, w, h)
 }
 
+/// Convertit une image NV12 BT.709 « TV » (16-235) en RVBA, pour les
+/// aperçus. `out` doit contenir `width * height * 4` octets.
+pub fn nv12_to_rgba(src: &[u8], width: usize, height: usize, out: &mut [u8]) {
+    let luma = width * height;
+    debug_assert!(src.len() >= luma + luma / 2 && out.len() >= luma * 4);
+    let (y_plane, uv_plane) = src.split_at(luma);
+    for row in 0..height {
+        let uv_row = &uv_plane[(row / 2) * width..];
+        for col in 0..width {
+            let y = (y_plane[row * width + col] as f32 - 16.0) * 1.164_383;
+            let u = uv_row[col & !1] as f32 - 128.0;
+            let v = uv_row[(col & !1) + 1] as f32 - 128.0;
+            let r = y + 1.792_741 * v;
+            let g = y - 0.213_249 * u - 0.532_909 * v;
+            let b = y + 2.112_402 * u;
+            let pixel = &mut out[(row * width + col) * 4..][..4];
+            pixel[0] = r.round().clamp(0.0, 255.0) as u8;
+            pixel[1] = g.round().clamp(0.0, 255.0) as u8;
+            pixel[2] = b.round().clamp(0.0, 255.0) as u8;
+            pixel[3] = 255;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -31,6 +55,17 @@ mod tests {
     fn black_frame_layout() {
         let frame = black_nv12(4, 2);
         assert_eq!(frame, vec![16, 16, 16, 16, 16, 16, 16, 16, 128, 128, 128, 128]);
+    }
+
+    #[test]
+    fn nv12_conversion_extremes() {
+        let mut out = vec![0u8; 4 * 2 * 4];
+        nv12_to_rgba(&black_nv12(4, 2), 4, 2, &mut out);
+        assert!(out.chunks(4).all(|p| p == [0, 0, 0, 255]));
+        let mut white = vec![235u8; 8];
+        white.extend([128u8; 4]);
+        nv12_to_rgba(&white, 4, 2, &mut out);
+        assert!(out.chunks(4).all(|p| p == [255, 255, 255, 255]));
     }
 
     #[test]

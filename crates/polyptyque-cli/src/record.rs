@@ -13,7 +13,8 @@ use polyptyque_core::encoder::bytes_per_hour;
 use polyptyque_core::naming;
 use polyptyque_core::paths;
 use polyptyque_core::platform::Platform;
-use polyptyque_engine::{probe, resolve, Session, SessionPlan, SourceState, SourceStatus};
+use polyptyque_engine::resolve::{self, PrepareEvent};
+use polyptyque_engine::{probe, Session, SessionPlan, SourceState, SourceStatus};
 
 use crate::app::{RECORDING, STOP_REQUESTED};
 use crate::{keys, ui};
@@ -131,44 +132,15 @@ pub fn run(platform: &Arc<dyn Platform>, config: &Config) -> Result<()> {
     Ok(())
 }
 
-/// Retrouve ou lance la fenêtre de chaque source. Renvoie les noms des
-/// sources encore introuvables.
+/// Retrouve ou lance la fenêtre de chaque source, en affichant
+/// l'avancement. Renvoie les noms des sources encore introuvables.
 fn prepare_windows(platform: &dyn Platform, sources: &[Source]) -> Vec<String> {
-    let windows = platform.list_windows();
-    let mut waiting: Vec<&Source> = Vec::new();
-    let mut missing = Vec::new();
-    for source in sources {
-        if resolve::find_window(platform, source, &windows).is_some() {
-            ui::success(&format!("{} : fenêtre trouvée.", source.name));
-        } else if source.should_launch() {
-            match resolve::launch(source) {
-                Ok(()) => {
-                    println!("… {} : lancement.", source.name);
-                    waiting.push(source);
-                }
-                Err(e) => {
-                    ui::failure(&format!("{} : {e:#}", source.name));
-                    missing.push(source.name.clone());
-                }
-            }
-        } else {
-            missing.push(source.name.clone());
-        }
-    }
-    let deadline = Instant::now() + LAUNCH_WAIT;
-    while !waiting.is_empty() && Instant::now() < deadline {
-        thread::sleep(Duration::from_millis(500));
-        let windows = platform.list_windows();
-        waiting.retain(|source| {
-            let found = resolve::find_window(platform, source, &windows).is_some();
-            if found {
-                ui::success(&format!("{} : fenêtre ouverte.", source.name));
-            }
-            !found
-        });
-    }
-    missing.extend(waiting.iter().map(|s| s.name.clone()));
-    missing
+    resolve::prepare_windows(platform, sources, LAUNCH_WAIT, |event| match event {
+        PrepareEvent::Found(source) => ui::success(&format!("{} : fenêtre trouvée.", source.name)),
+        PrepareEvent::Launching(source) => println!("… {} : lancement.", source.name),
+        PrepareEvent::LaunchFailed(source, error) => ui::failure(&format!("{} : {error}", source.name)),
+        PrepareEvent::Opened(source) => ui::success(&format!("{} : fenêtre ouverte.", source.name)),
+    })
 }
 
 /// Affichage en direct jusqu'à la demande d'arrêt (Q, Échap, Ctrl+C ou

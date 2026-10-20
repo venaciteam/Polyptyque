@@ -1,0 +1,428 @@
+// Fenêtre principale de Polyptyque.
+
+import { ListView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { Bridge, SceneItem, SourceItem, SourceCard, WindowItem } from "bridge.slint";
+import { ActionButton, IconButton, ListRow, Panel, SourceCardView, Toggle } from "components.slint";
+import {
+    AddApplicationSheet, AddBrowserSheet, BusyOverlay, ConfirmSheet, SceneNameSheet, SettingsSheet, Toast,
+} from "sheets.slint";
+
+export { Bridge, SceneItem, SourceItem, SourceCard, WindowItem }
+
+// Logo : trois panneaux, comme un polyptyque.
+component Logo inherits HorizontalLayout {
+    spacing: 3px;
+    height: 24px;
+    Rectangle {
+        width: 7px;
+        border-radius: 2px;
+        background: Theme.accent.with-alpha(0.55);
+    }
+    Rectangle {
+        width: 7px;
+        border-radius: 2px;
+        background: Theme.accent;
+    }
+    Rectangle {
+        width: 7px;
+        border-radius: 2px;
+        background: Theme.accent.with-alpha(0.55);
+    }
+}
+
+component StatusPill inherits Rectangle {
+    height: 30px;
+    width: row.preferred-width;
+    border-radius: 15px;
+    background: Bridge.recording ? Theme.recording : Theme.surface-raised;
+    border-width: Bridge.recording ? 0 : 1px;
+    border-color: Theme.border;
+
+    row := HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 14px;
+        spacing: 8px;
+        Rectangle {
+            width: 8px;
+            height: 8px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 4px;
+            background: Bridge.recording ? #ffffff : Theme.ok;
+        }
+        Text {
+            text: Bridge.recording ? "ENREGISTREMENT  \{Bridge.elapsed}" : "Prêt";
+            color: Bridge.recording ? #ffffff : Theme.text;
+            font-weight: 700;
+            font-size: Theme.font-normal;
+            vertical-alignment: center;
+        }
+    }
+}
+
+component TopBar inherits HorizontalLayout {
+    spacing: 14px;
+    height: 36px;
+    Logo {
+        y: (parent.height - self.height) / 2;
+    }
+    Text {
+        text: "Polyptyque";
+        color: Theme.text;
+        font-size: 17px;
+        font-weight: 700;
+        vertical-alignment: center;
+    }
+    Text {
+        text: Bridge.scene-name;
+        color: Theme.text-muted;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    Rectangle {
+        horizontal-stretch: 1;
+    }
+    Text {
+        text: Bridge.encoder-text;
+        color: Theme.text-faint;
+        font-size: Theme.font-small;
+        vertical-alignment: center;
+    }
+    Text {
+        text: Bridge.disk-text;
+        color: Bridge.disk-warning ? Theme.warning : Theme.text-muted;
+        font-size: Theme.font-small;
+        vertical-alignment: center;
+    }
+    StatusPill { }
+}
+
+// Grille des aperçus : choisit le nombre de colonnes qui donne les plus
+// grandes cartes possibles en 16:9, puis centre l'ensemble.
+component PreviewGrid inherits Rectangle {
+    property <int> count: Bridge.cards.length;
+    property <length> spacing: Theme.gap;
+    // Hauteur de la barre d'informations sous chaque aperçu.
+    property <length> info-height: 50px;
+
+    pure function rows-for(columns: int) -> int {
+        return Math.ceil(self.count / columns);
+    }
+    pure function width-for(columns: int) -> length {
+        return min(
+            (self.width - self.spacing * (columns - 1)) / columns,
+            ((self.height - self.spacing * (self.rows-for(columns) - 1)) / self.rows-for(columns) - self.info-height) * 16 / 9);
+    }
+
+    property <int> best-2: count >= 2 && self.width-for(2) > self.width-for(1) ? 2 : 1;
+    property <int> best-3: count >= 3 && self.width-for(3) > self.width-for(best-2) ? 3 : best-2;
+    property <int> columns: count >= 4 && self.width-for(4) > self.width-for(best-3) ? 4 : best-3;
+    property <int> rows: self.rows-for(columns);
+    property <length> cell-width: max(self.width-for(columns), 120px);
+    property <length> cell-height: cell-width * 9 / 16 + info-height;
+    property <length> offset-x: (self.width - columns * cell-width - (columns - 1) * spacing) / 2;
+    property <length> offset-y: (self.height - rows * cell-height - (rows - 1) * spacing) / 2;
+
+    if count == 0: Rectangle {
+        border-radius: Theme.radius;
+        border-width: 1px;
+        border-color: Theme.border;
+        VerticalLayout {
+            alignment: center;
+            spacing: 16px;
+            Text {
+                text: "Aucune source dans cette scène";
+                color: Theme.text;
+                font-size: Theme.font-title;
+                font-weight: 600;
+                horizontal-alignment: center;
+            }
+            Text {
+                text: "Ajoute un navigateur (son isolé grâce à un profil dédié) ou n'importe quelle application.";
+                color: Theme.text-muted;
+                horizontal-alignment: center;
+            }
+            HorizontalLayout {
+                alignment: center;
+                spacing: 10px;
+                ActionButton {
+                    text: "Navigateur";
+                    icon: @image-url("icons/globe.svg");
+                    has-icon: true;
+                    kind: "primary";
+                    clicked => {
+                        Bridge.request-add-browser();
+                    }
+                }
+                ActionButton {
+                    text: "Application";
+                    icon: @image-url("icons/window.svg");
+                    has-icon: true;
+                    clicked => {
+                        Bridge.request-add-application();
+                    }
+                }
+            }
+        }
+    }
+
+    for card[index] in Bridge.cards: SourceCardView {
+        x: offset-x + Math.mod(index, columns) * (cell-width + spacing);
+        y: offset-y + Math.floor(index / columns) * (cell-height + spacing);
+        width: cell-width;
+        height: cell-height;
+        card: card;
+        recording: Bridge.recording;
+        open-window => {
+            Bridge.open-source(card.id);
+        }
+    }
+}
+
+component ScenesPanel inherits Panel {
+    title: "SCÈNES";
+    ListView {
+        vertical-stretch: 1;
+        for scene in Bridge.scenes: ListRow {
+            text: scene.name;
+            detail: scene.count + "";
+            selected: scene.active;
+            enabled: !Bridge.recording;
+            clicked => {
+                Bridge.select-scene(scene.id);
+            }
+        }
+    }
+    HorizontalLayout {
+        spacing: 2px;
+        IconButton {
+            icon: @image-url("icons/plus.svg");
+            label: "Nouvelle scène";
+            enabled: !Bridge.recording;
+            clicked => {
+                Bridge.request-new-scene();
+            }
+        }
+        IconButton {
+            icon: @image-url("icons/edit.svg");
+            label: "Renommer la scène";
+            enabled: !Bridge.recording;
+            clicked => {
+                Bridge.request-rename-scene();
+            }
+        }
+        IconButton {
+            icon: @image-url("icons/trash.svg");
+            label: "Supprimer la scène";
+            enabled: !Bridge.recording && Bridge.scenes.length > 1;
+            clicked => {
+                Bridge.request-delete-scene();
+            }
+        }
+        Rectangle { }
+    }
+}
+
+component SourcesPanel inherits Panel {
+    title: "SOURCES";
+    ListView {
+        vertical-stretch: 1;
+        for source[index] in Bridge.sources: ListRow {
+            text: source.name;
+            detail: source.kind;
+            icon: source.browser ? @image-url("icons/globe.svg") : @image-url("icons/window.svg");
+            has-icon: true;
+            selected: index == Bridge.selected-source;
+            clicked => {
+                Bridge.selected-source = index;
+            }
+        }
+    }
+    HorizontalLayout {
+        spacing: 6px;
+        ActionButton {
+            text: "Navigateur";
+            icon: @image-url("icons/plus.svg");
+            has-icon: true;
+            enabled: !Bridge.recording;
+            clicked => {
+                Bridge.request-add-browser();
+            }
+        }
+        ActionButton {
+            text: "Application";
+            icon: @image-url("icons/plus.svg");
+            has-icon: true;
+            enabled: !Bridge.recording;
+            clicked => {
+                Bridge.request-add-application();
+            }
+        }
+        Rectangle { }
+        IconButton {
+            icon: @image-url("icons/up.svg");
+            label: "Monter la source";
+            enabled: !Bridge.recording && Bridge.selected-source > 0;
+            clicked => {
+                Bridge.move-source(-1);
+            }
+        }
+        IconButton {
+            icon: @image-url("icons/down.svg");
+            label: "Descendre la source";
+            enabled: !Bridge.recording && Bridge.selected-source >= 0 && Bridge.selected-source < Bridge.sources.length - 1;
+            clicked => {
+                Bridge.move-source(1);
+            }
+        }
+        IconButton {
+            icon: @image-url("icons/trash.svg");
+            label: "Supprimer la source";
+            enabled: !Bridge.recording && Bridge.selected-source >= 0;
+            clicked => {
+                Bridge.request-remove-source();
+            }
+        }
+    }
+}
+
+component RecordButton inherits Rectangle {
+    height: 58px;
+    border-radius: Theme.radius;
+    background: Bridge.recording ? (touch.has-hover ? Theme.surface-hover : Theme.surface-raised) : (touch.has-hover ? Theme.recording-hover : Theme.recording);
+    border-width: Bridge.recording ? 1px : 0;
+    border-color: Theme.recording;
+    accessible-role: button;
+    accessible-label: Bridge.recording ? "Arrêter l'enregistrement" : "Démarrer l'enregistrement";
+    animate background { duration: 120ms; }
+
+    HorizontalLayout {
+        alignment: center;
+        spacing: 10px;
+        Image {
+            source: Bridge.recording ? @image-url("icons/stop.svg") : @image-url("icons/record.svg");
+            width: 18px;
+            height: 18px;
+            y: (parent.height - self.height) / 2;
+            colorize: Bridge.recording ? Theme.recording : #ffffff;
+        }
+        Text {
+            text: Bridge.recording ? "Arrêter" : "Démarrer l'enregistrement";
+            color: #ffffff;
+            font-size: Theme.font-title;
+            font-weight: 700;
+            vertical-alignment: center;
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            Bridge.start-stop();
+        }
+    }
+}
+
+component ControlsPanel inherits Panel {
+    title: "COMMANDES";
+    RecordButton { }
+    HorizontalLayout {
+        spacing: 8px;
+        ActionButton {
+            text: "Réglages";
+            icon: @image-url("icons/settings.svg");
+            has-icon: true;
+            horizontal-stretch: 1;
+            enabled: !Bridge.recording;
+            clicked => {
+                Bridge.open-settings();
+            }
+        }
+        ActionButton {
+            text: "Fichiers";
+            icon: @image-url("icons/folder.svg");
+            has-icon: true;
+            horizontal-stretch: 1;
+            clicked => {
+                Bridge.open-output-folder();
+            }
+        }
+    }
+    Toggle {
+        text: "Aperçus en direct";
+        checked: Bridge.previews-enabled;
+        toggled => {
+            Bridge.toggle-previews();
+        }
+    }
+    Rectangle {
+        vertical-stretch: 1;
+    }
+    Text {
+        text: "Polyptyque \{Bridge.version}";
+        color: Theme.text-faint;
+        font-size: Theme.font-small;
+    }
+}
+
+export component AppWindow inherits Window {
+    title: Bridge.recording ? "● \{Bridge.elapsed} · Polyptyque" : "Polyptyque";
+    preferred-width: 1280px;
+    preferred-height: 820px;
+    min-width: 980px;
+    min-height: 640px;
+    background: Theme.background;
+    default-font-size: Theme.font-normal;
+
+    VerticalLayout {
+        padding: 16px;
+        spacing: Theme.gap;
+        TopBar { }
+        PreviewGrid {
+            vertical-stretch: 1;
+        }
+        HorizontalLayout {
+            height: 236px;
+            spacing: Theme.gap;
+            ScenesPanel {
+                width: 230px;
+            }
+            SourcesPanel {
+                horizontal-stretch: 1;
+            }
+            ControlsPanel {
+                width: 300px;
+            }
+        }
+    }
+
+    if Bridge.toast-text != "": Toast {
+        x: (root.width - self.width) / 2;
+        y: root.height - self.height - 262px;
+    }
+
+    if Bridge.sheet == "browser": AddBrowserSheet {
+        width: root.width;
+        height: root.height;
+    }
+    if Bridge.sheet == "application": AddApplicationSheet {
+        width: root.width;
+        height: root.height;
+    }
+    if Bridge.sheet == "settings": SettingsSheet {
+        width: root.width;
+        height: root.height;
+    }
+    if Bridge.sheet == "scene-new" || Bridge.sheet == "scene-rename": SceneNameSheet {
+        width: root.width;
+        height: root.height;
+    }
+    if Bridge.sheet == "confirm": ConfirmSheet {
+        width: root.width;
+        height: root.height;
+    }
+    if Bridge.busy-text != "": BusyOverlay {
+        width: root.width;
+        height: root.height;
+    }
+}

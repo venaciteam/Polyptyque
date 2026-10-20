@@ -285,7 +285,14 @@ Inspirée d'[[OBS Studio]], volontairement allégée, thème sombre.
 └──────────────┴────────────────────┴────────────────────────┘
 ```
 
-- **Grille d'aperçus** de toutes les sources de la scène, en basse définition pour ne pas pénaliser l'enregistrement, désactivable.
+- **Grille d'aperçus** de toutes les sources de la scène, en basse définition pour ne pas pénaliser l'enregistrement, désactivable. Chaque aperçu a sa propre petite capture (384 × 216, environ 10 images par seconde), indépendante de l'enregistrement : il fonctionne aussi hors enregistrement.
+
+> [!example]- Captures de l'interface (mode démonstration)
+> ![Aperçus](captures/interface-apercus.png)
+> ![Enregistrement](captures/interface-enregistrement.png)
+> ![Réglages](captures/interface-reglages.png)
+> ![Ajout d'une source navigateur](captures/interface-ajout-navigateur.png)
+> ![Ajout d'une source application](captures/interface-ajout-application.png)
 - Par source : nom, état, cadence réelle, indicateur de niveau sonore, durée, taille du fichier, bouton d'enregistrement individuel.
 - **Barre d'état** : espace disque libre, autonomie estimée, charge processeur et carte graphique, images perdues.
 - **Fenêtre de paramètres** : Sortie, Encodage, Audio, Raccourcis, Général.
@@ -472,7 +479,9 @@ Seule une implémentation de `Platform` est à écrire pour chaque système (`po
 > - [x] Moteur : capture, horloge commune, cadence constante, encodage, MKV (validé en simulation)
 > - [x] Fenêtres perdues et rattachement automatique, surveillance du disque, anti-veille, journaux
 > - [x] Navigateurs gérés : détection, profils dédiés, lancement, restauration des onglets, reconnaissance
-> - [ ] Validation sur la machine de référence : son isolé par profil (Firefox, Chrome), Discord, bordure jaune
+> - [x] Validation sur la machine de référence : capture, encodage NVENC, plusieurs réglages de qualité
+> - [x] Validation sur la machine de référence : **son isolé par profil de navigateur**
+> - [ ] Validation sur la machine de référence : Discord, bordure jaune
 > - [ ] Nombre de flux 1080p60 encodables en parallèle sur la RTX 3080
 > - [ ] Test d'endurance de 1 h, puis de 12 h ; vérification de la synchronisation et de la lisibilité des fichiers
 
@@ -481,9 +490,11 @@ Seule une implémentation de `Platform` est à écrire pour chaque système (`po
 > - [ ] Enregistrement individuel d'une source
 > - [ ] Microphone, conversion MP4
 
-> [!todo] Étape 2 - Interface graphique ([[Slint]])
-> - [ ] Scènes, sources, grille d'aperçus, paramètres, nommage
-> - [ ] Verrouillage pendant l'enregistrement, raccourcis globaux
+> [!todo] Étape 2 - Interface graphique ([[Slint]]), écrite le 2026-10-20
+> - [x] Scènes, sources, grille d'aperçus en direct, réglages, nommage
+> - [x] Verrouillage pendant l'enregistrement, raccourcis globaux réglables
+> - [x] Mode démonstration hors Windows (fausses fenêtres) pour développer et vérifier l'interface
+> - [ ] Validation sur la machine de référence
 
 > [!todo] Étape 3 - Installateur ([[Velopack]])
 > - [ ] `Setup.exe` unique avec image d'accueil, mises à jour automatiques
@@ -526,6 +537,8 @@ Seule une implémentation de `Platform` est à écrire pour chaque système (`po
 | 2026-10-20 | Encodage par un processus FFmpeg 8.1 par source (pilotes NVIDIA 570+) |
 | 2026-10-20 | Branches : `dev` pour le travail en cours, `main` pour les versions validées (fusion de `dev` dans `main` après validation) |
 | 2026-10-20 | Premier essai sur la machine de référence : capture, encodage NVENC et fichier vidéo fonctionnels |
+| 2026-10-20 | **Son isolé par fenêtre validé** sur la machine de référence (profils de navigateur dédiés) |
+| 2026-10-20 | Interface Slint : thème dans `ui/theme.slint`, interface reliée au moteur par un « pont » unique (`ui/bridge.slint`) |
 
 ---
 

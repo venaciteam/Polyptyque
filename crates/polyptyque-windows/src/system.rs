@@ -1,7 +1,8 @@
 //! Horloge, mise en veille, minuteries et espace disque.
 
 use std::path::Path;
-use std::sync::OnceLock;
+use std::sync::{mpsc, Mutex, OnceLock};
+use std::thread;
 
 use windows::core::HSTRING;
 use windows::Win32::Media::{timeBeginPeriod, timeEndPeriod};
@@ -27,19 +28,46 @@ pub fn now_hns() -> u64 {
     (counter as u128 * 10_000_000 / frequency as u128) as u64
 }
 
+/// Fil qui maintient l'ordinateur éveillé. L'état « éveillé » de Windows est
+/// attaché au fil qui le demande : un fil dédié permet de démarrer et
+/// d'arrêter un enregistrement depuis n'importe quel autre fil.
+static KEEP_AWAKE: Mutex<Option<(mpsc::Sender<()>, thread::JoinHandle<()>)>> = Mutex::new(None);
+
 /// Empêche la mise en veille (système et écran) et passe les minuteries à
 /// 1 ms pour un rythme d'images régulier.
 pub fn begin_session() {
     unsafe {
-        SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED);
         timeBeginPeriod(1);
+    }
+    let mut guard = KEEP_AWAKE.lock().unwrap_or_else(|e| e.into_inner());
+    if guard.is_some() {
+        return;
+    }
+    let (stop, wait) = mpsc::channel::<()>();
+    let spawned = thread::Builder::new().name("anti-veille".into()).spawn(move || {
+        unsafe {
+            SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED);
+        }
+        // Attend la fin de l'enregistrement (ou la fermeture du canal).
+        let _ = wait.recv();
+        unsafe {
+            SetThreadExecutionState(ES_CONTINUOUS);
+        }
+    });
+    match spawned {
+        Ok(handle) => *guard = Some((stop, handle)),
+        Err(e) => log::warn!("anti-veille indisponible : {e}"),
     }
 }
 
 pub fn end_session() {
     unsafe {
-        SetThreadExecutionState(ES_CONTINUOUS);
         timeEndPeriod(1);
+    }
+    let taken = KEEP_AWAKE.lock().unwrap_or_else(|e| e.into_inner()).take();
+    if let Some((stop, handle)) = taken {
+        let _ = stop.send(());
+        let _ = handle.join();
     }
 }
 

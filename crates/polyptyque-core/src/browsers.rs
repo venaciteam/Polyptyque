@@ -23,10 +23,15 @@ pub fn classify_executable(exe: &Path) -> Option<BrowserFamily> {
 /// Nom du fichier sans extension, en minuscules. Accepte les deux types de
 /// séparateurs, pour lire des chemins Windows depuis n'importe quel système.
 pub fn file_stem(path: &Path) -> Option<String> {
+    program_name(path).map(|name| name.to_lowercase())
+}
+
+/// Nom du programme tel qu'il est écrit : « Discord » pour `…\Discord.exe`.
+pub fn program_name(path: &Path) -> Option<String> {
     let text = path.to_string_lossy();
     let name = text.rsplit(['\\', '/']).next().filter(|n| !n.is_empty())?;
     let stem = name.rsplit_once('.').map_or(name, |(stem, _)| stem);
-    Some(stem.to_lowercase())
+    Some(stem.to_string())
 }
 
 /// Tor Browser embarque un `firefox.exe` : il ne doit pas être géré comme un

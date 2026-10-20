@@ -8,6 +8,7 @@
 
 mod audio;
 mod browsers;
+pub mod hotkeys;
 mod pipe;
 mod process;
 mod system;

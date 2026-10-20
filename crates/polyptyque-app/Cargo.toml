@@ -1,0 +1,27 @@
+[package]
+name = "polyptyque-app"
+description = "Interface graphique de Polyptyque"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+build = "build.rs"
+
+[[bin]]
+name = "polyptyque"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+log.workspace = true
+polyptyque-core.workspace = true
+polyptyque-engine.workspace = true
+simplelog.workspace = true
+slint = "1.18"
+
+[target.'cfg(windows)'.dependencies]
+polyptyque-windows.workspace = true
+rfd = { version = "0.17", default-features = false }
+
+[build-dependencies]
+slint-build = "1.18"

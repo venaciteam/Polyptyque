@@ -7,7 +7,7 @@ use anyhow::Result;
 use console::style;
 use dialoguer::{Confirm, Input, Select};
 use polyptyque_core::browsers::{classify_executable, file_stem, is_tor_browser};
-use polyptyque_core::config::{new_id, BrowserFamily, BrowserRef, Config, Source, SourceKind};
+use polyptyque_core::config::{BrowserFamily, BrowserRef, Config, Source, SourceKind};
 use polyptyque_core::paths;
 use polyptyque_core::platform::Platform;
 use polyptyque_engine::resolve;
@@ -83,18 +83,8 @@ pub fn add_browser(platform: &dyn Platform, config: &mut Config) -> Result<()> {
         .allow_empty(true)
         .interact_text()?;
 
-    let id = new_id();
-    let source = Source {
-        name: name.trim().to_string(),
-        capture_cursor: true,
-        relaunch: true,
-        kind: SourceKind::Browser {
-            profile_dir: paths::profiles_dir().join(&id),
-            start_url: Some(url.trim().to_string()).filter(|u| !u.is_empty()),
-            browser,
-        },
-        id,
-    };
+    let url = Some(url.as_str()).filter(|u| !u.trim().is_empty());
+    let source = Source::browser(&name, browser, url, &paths::profiles_dir());
     config.active_scene_mut().sources.push(source.clone());
     ui::success(&format!("Source « {} » ajoutée avec son propre profil de navigateur.", source.name));
     println!(
@@ -167,18 +157,7 @@ pub fn add_application(platform: &dyn Platform, config: &mut Config) -> Result<(
             .default(true)
             .interact()?;
 
-        let source = Source {
-            id: new_id(),
-            name: name.trim().to_string(),
-            capture_cursor,
-            relaunch,
-            kind: SourceKind::Application {
-                exe_path: window.exe.clone(),
-                window_class: window.class.clone(),
-                window_title: window.title.clone(),
-                launch_args: Vec::new(),
-            },
-        };
+        let source = Source::application(&name, window, relaunch, capture_cursor);
         ui::success(&format!("Source « {} » ajoutée.", source.name));
         config.active_scene_mut().sources.push(source);
         ui::pause();

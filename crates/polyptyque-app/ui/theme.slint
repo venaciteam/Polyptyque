@@ -1,0 +1,51 @@
+// Apparence de Polyptyque : couleurs, tailles, arrondis.
+// Modifier ce fichier suffit à changer l'allure de toute l'interface.
+
+export global Theme {
+    // Fonds, du plus profond au plus en relief.
+    out property <color> background: #0e1014;
+    out property <color> surface: #16191f;
+    out property <color> surface-raised: #1d2129;
+    out property <color> surface-hover: #252a34;
+    out property <color> border: #2a2f39;
+    out property <color> preview-background: #07080a;
+    out property <color> backdrop: #000000b0;
+
+    // Texte.
+    out property <color> text: #e8eaee;
+    out property <color> text-muted: #8a92a0;
+    out property <color> text-faint: #5c6370;
+
+    // Couleurs d'accent et d'état.
+    out property <color> accent: #7c8cff;
+    out property <color> accent-hover: #93a0ff;
+    out property <color> recording: #ff4d5a;
+    out property <color> recording-hover: #ff6b76;
+    out property <color> ok: #3dd68c;
+    out property <color> warning: #f5b83d;
+    out property <color> error: #ff6b6b;
+
+    // Tailles.
+    out property <length> radius: 10px;
+    out property <length> radius-small: 6px;
+    out property <length> gap: 12px;
+    out property <length> padding: 14px;
+    out property <length> font-small: 11px;
+    out property <length> font-normal: 13px;
+    out property <length> font-title: 15px;
+    out property <length> font-large: 20px;
+
+    // Couleur associée à un « ton » : 0 neutre, 1 bon, 2 attention, 3 erreur.
+    public pure function tone-color(tone: int) -> color {
+        if tone == 1 {
+            return self.ok;
+        }
+        if tone == 2 {
+            return self.warning;
+        }
+        if tone == 3 {
+            return self.error;
+        }
+        return self.text-muted;
+    }
+}

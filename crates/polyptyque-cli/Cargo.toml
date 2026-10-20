@@ -7,7 +7,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [[bin]]
-name = "polyptyque"
+name = "polyptyque-console"
 path = "src/main.rs"
 
 [dependencies]

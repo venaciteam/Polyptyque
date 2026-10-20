@@ -21,7 +21,7 @@ jobs:
       - name: Outils
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y -q ffmpeg
+          sudo apt-get install -y -q ffmpeg libfontconfig1-dev libxkbcommon-dev
           rustup toolchain install stable --profile minimal --component rustfmt,clippy
           rustup default stable
       - name: Mise en forme
@@ -45,7 +45,7 @@ jobs:
       - name: Tests
         run: cargo test --workspace
       - name: Compilation
-        run: cargo build --release -p polyptyque-cli
+        run: cargo build --release -p polyptyque-app -p polyptyque-cli
       - name: Téléchargement de FFmpeg
         shell: pwsh
         run: |
@@ -57,6 +57,7 @@ jobs:
           $dist = "dist/Polyptyque"
           New-Item -ItemType Directory -Force -Path $dist | Out-Null
           Copy-Item target/release/polyptyque.exe $dist/
+          Copy-Item target/release/polyptyque-console.exe $dist/
           Copy-Item "ffmpeg/$env:FFMPEG_ZIP/bin/ffmpeg.exe" $dist/
           Copy-Item "ffmpeg/$env:FFMPEG_ZIP/LICENSE.txt" "$dist/FFMPEG-LICENSE.txt"
           Copy-Item LICENSE "$dist/LICENSE.txt"
@@ -65,6 +66,6 @@ jobs:
           & "$dist/ffmpeg.exe" -hide_banner -encoders | Select-String -Pattern "nvenc|amf|qsv|libx264"
       - uses: actions/upload-artifact@v4
         with:
-          name: Polyptyque-prototype-windows
+          name: Polyptyque-windows
           path: dist/
           retention-days: 30

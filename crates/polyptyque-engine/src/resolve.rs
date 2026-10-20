@@ -5,6 +5,8 @@ use std::ffi::OsString;
 use std::fs;
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use polyptyque_core::browsers::{command_line_uses_profile, file_stem, launch_args, window_class, GECKO_USER_JS};
@@ -49,6 +51,63 @@ pub fn find_window(platform: &dyn Platform, source: &Source, windows: &[WindowIn
                 .map(|w| (*w).clone())
         }
     }
+}
+
+/// Étapes de la préparation des fenêtres avant un enregistrement.
+pub enum PrepareEvent<'a> {
+    /// La fenêtre est déjà ouverte.
+    Found(&'a Source),
+    /// Le programme est lancé, en attente de sa fenêtre.
+    Launching(&'a Source),
+    LaunchFailed(&'a Source, String),
+    /// La fenêtre lancée vient d'apparaître.
+    Opened(&'a Source),
+}
+
+/// Retrouve ou lance la fenêtre de chaque source, puis attend au plus
+/// `wait` celles qui ont été lancées. Renvoie les noms des sources encore
+/// introuvables (elles seront rattachées dès leur apparition).
+pub fn prepare_windows(
+    platform: &dyn Platform,
+    sources: &[Source],
+    wait: Duration,
+    mut on_event: impl FnMut(PrepareEvent),
+) -> Vec<String> {
+    let windows = platform.list_windows();
+    let mut waiting: Vec<&Source> = Vec::new();
+    let mut missing = Vec::new();
+    for source in sources {
+        if find_window(platform, source, &windows).is_some() {
+            on_event(PrepareEvent::Found(source));
+        } else if source.should_launch() {
+            match launch(source) {
+                Ok(()) => {
+                    on_event(PrepareEvent::Launching(source));
+                    waiting.push(source);
+                }
+                Err(e) => {
+                    on_event(PrepareEvent::LaunchFailed(source, format!("{e:#}")));
+                    missing.push(source.name.clone());
+                }
+            }
+        } else {
+            missing.push(source.name.clone());
+        }
+    }
+    let deadline = Instant::now() + wait;
+    while !waiting.is_empty() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(500));
+        let windows = platform.list_windows();
+        waiting.retain(|source| {
+            let found = find_window(platform, source, &windows).is_some();
+            if found {
+                on_event(PrepareEvent::Opened(source));
+            }
+            !found
+        });
+    }
+    missing.extend(waiting.iter().map(|s| s.name.clone()));
+    missing
 }
 
 /// Lance le programme d'une source : le navigateur sur son profil dédié, ou

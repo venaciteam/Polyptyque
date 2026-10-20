@@ -1,0 +1,421 @@
+// Fenêtres modales : ajout de sources, scènes, réglages, confirmations.
+
+import { ComboBox, LineEdit, CheckBox, ListView, Spinner } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { Bridge } from "bridge.slint";
+import { ActionButton, Field, Footer, Note, Sheet, ListRow, Toggle } from "components.slint";
+
+export component AddBrowserSheet inherits Sheet {
+    title: "Ajouter une source navigateur";
+    close => {
+        Bridge.close-sheet();
+    }
+
+    Field {
+        label: "Navigateur";
+        ComboBox {
+            model: Bridge.browser-choices;
+            current-index <=> Bridge.browser-index;
+        }
+    }
+    if Bridge.browser-index == Bridge.browser-choices.length - 1: Field {
+        label: "Fichier .exe du navigateur";
+        LineEdit {
+            text <=> Bridge.browser-path;
+            placeholder-text: "C:\\Program Files\\…\\navigateur.exe";
+        }
+    }
+    Field {
+        label: "Nom de la source";
+        hint: "Utilisé dans le nom du fichier enregistré.";
+        LineEdit {
+            text <=> Bridge.new-name;
+        }
+    }
+    Field {
+        label: "Adresse au premier lancement (facultatif)";
+        LineEdit {
+            text <=> Bridge.new-url;
+            placeholder-text: "https://…";
+        }
+    }
+    CheckBox {
+        text: "Ouvrir maintenant pour me connecter et préparer mes onglets";
+        checked <=> Bridge.open-now;
+    }
+    Note {
+        text: "Cette source a son propre profil : connexions et onglets sont conservés. Tout son joué dans ce profil, quel que soit l'onglet, sera enregistré dans son fichier.";
+    }
+    Footer {
+        ActionButton {
+            text: "Annuler";
+            kind: "ghost";
+            clicked => {
+                Bridge.close-sheet();
+            }
+        }
+        ActionButton {
+            text: "Ajouter";
+            kind: "primary";
+            enabled: Bridge.new-name != "";
+            clicked => {
+                Bridge.confirm-add-browser();
+            }
+        }
+    }
+}
+
+export component AddApplicationSheet inherits Sheet {
+    title: "Ajouter une source application";
+    sheet-width: 600px;
+    close => {
+        Bridge.close-sheet();
+    }
+
+    Field {
+        label: "Fenêtre à enregistrer";
+        Rectangle {
+            height: 230px;
+            background: Theme.surface-raised;
+            border-radius: Theme.radius-small;
+            border-width: 1px;
+            border-color: Theme.border;
+            ListView {
+                for window[index] in Bridge.windows: ListRow {
+                    text: window.title;
+                    detail: window.program;
+                    selected: index == Bridge.window-index;
+                    clicked => {
+                        Bridge.window-index = index;
+                        Bridge.window-selected(index);
+                    }
+                }
+            }
+        }
+    }
+    HorizontalLayout {
+        alignment: end;
+        ActionButton {
+            text: "Actualiser la liste";
+            icon: @image-url("icons/refresh.svg");
+            has-icon: true;
+            kind: "ghost";
+            clicked => {
+                Bridge.refresh-windows();
+            }
+        }
+    }
+    if Bridge.window-index >= 0 && Bridge.window-index < Bridge.windows.length && Bridge.windows[Bridge.window-index].browser: Note {
+        tone: 2;
+        text: "C'est un navigateur : son son sera mélangé avec celui de toutes ses autres fenêtres. Pour isoler le son, ajoute plutôt une source navigateur.";
+    }
+    Field {
+        label: "Nom de la source";
+        hint: "Utilisé dans le nom du fichier enregistré.";
+        LineEdit {
+            text <=> Bridge.new-name;
+        }
+    }
+    CheckBox {
+        text: "Relancer ce programme s'il n'est pas ouvert au démarrage d'un enregistrement";
+        checked <=> Bridge.relaunch;
+    }
+    CheckBox {
+        text: "Afficher le curseur de la souris dans l'enregistrement";
+        checked <=> Bridge.capture-cursor;
+    }
+    Footer {
+        ActionButton {
+            text: "Annuler";
+            kind: "ghost";
+            clicked => {
+                Bridge.close-sheet();
+            }
+        }
+        ActionButton {
+            text: "Ajouter";
+            kind: "primary";
+            enabled: Bridge.window-index >= 0 && Bridge.new-name != "";
+            clicked => {
+                Bridge.confirm-add-application();
+            }
+        }
+    }
+}
+
+export component SceneNameSheet inherits Sheet {
+    title: Bridge.sheet == "scene-new" ? "Nouvelle scène" : "Renommer la scène";
+    sheet-width: 440px;
+    close => {
+        Bridge.close-sheet();
+    }
+
+    Field {
+        label: "Nom de la scène";
+        LineEdit {
+            text <=> Bridge.scene-name-input;
+            accepted => {
+                Bridge.confirm-scene-name();
+            }
+        }
+    }
+    Footer {
+        ActionButton {
+            text: "Annuler";
+            kind: "ghost";
+            clicked => {
+                Bridge.close-sheet();
+            }
+        }
+        ActionButton {
+            text: Bridge.sheet == "scene-new" ? "Créer" : "Renommer";
+            kind: "primary";
+            enabled: Bridge.scene-name-input != "";
+            clicked => {
+                Bridge.confirm-scene-name();
+            }
+        }
+    }
+}
+
+export component ConfirmSheet inherits Sheet {
+    title: Bridge.confirm-title;
+    sheet-width: 460px;
+    close => {
+        Bridge.close-sheet();
+    }
+
+    Text {
+        text: Bridge.confirm-text;
+        color: Theme.text-muted;
+        wrap: word-wrap;
+    }
+    Footer {
+        ActionButton {
+            text: "Annuler";
+            kind: "ghost";
+            clicked => {
+                Bridge.close-sheet();
+            }
+        }
+        ActionButton {
+            text: Bridge.confirm-button;
+            kind: "danger";
+            clicked => {
+                Bridge.confirm-accepted();
+            }
+        }
+    }
+}
+
+export component SettingsSheet inherits Sheet {
+    title: "Réglages";
+    sheet-width: 780px;
+    close => {
+        Bridge.close-sheet();
+    }
+
+    HorizontalLayout {
+        spacing: 28px;
+        VerticalLayout {
+            spacing: 14px;
+            horizontal-stretch: 1;
+            Text {
+                text: "Enregistrement";
+                color: Theme.text;
+                font-weight: 700;
+            }
+            Field {
+                label: "Résolution";
+                ComboBox {
+                    model: Bridge.resolution-choices;
+                    current-index <=> Bridge.resolution-index;
+                }
+            }
+            Field {
+                label: "Images par seconde";
+                ComboBox {
+                    model: Bridge.fps-choices;
+                    current-index <=> Bridge.fps-index;
+                }
+            }
+            Field {
+                label: "Débit vidéo (kb/s)";
+                hint: "En 1080p à 60 i/s : 6 000 léger, 12 000 bon, 20 000 très bon.";
+                LineEdit {
+                    text <=> Bridge.bitrate-text;
+                    input-type: number;
+                }
+            }
+            Field {
+                label: "Format vidéo";
+                ComboBox {
+                    model: Bridge.codec-choices;
+                    current-index <=> Bridge.codec-index;
+                }
+            }
+            Field {
+                label: "Matériel d'encodage";
+                ComboBox {
+                    model: Bridge.hardware-choices;
+                    current-index <=> Bridge.hardware-index;
+                }
+            }
+            Field {
+                label: "Débit audio";
+                ComboBox {
+                    model: Bridge.audio-choices;
+                    current-index <=> Bridge.audio-index;
+                }
+            }
+        }
+        VerticalLayout {
+            spacing: 14px;
+            horizontal-stretch: 1;
+            Text {
+                text: "Fichiers et interface";
+                color: Theme.text;
+                font-weight: 700;
+            }
+            Field {
+                label: "Dossier des enregistrements";
+                HorizontalLayout {
+                    spacing: 8px;
+                    LineEdit {
+                        text <=> Bridge.output-dir;
+                        horizontal-stretch: 1;
+                    }
+                    if Bridge.can-browse: ActionButton {
+                        text: "Parcourir…";
+                        clicked => {
+                            Bridge.browse-output();
+                        }
+                    }
+                }
+            }
+            Field {
+                label: "Modèle de nom de fichier";
+                hint: "Variables : {date}, {heure}, {scène}, {source}.";
+                LineEdit {
+                    text <=> Bridge.template;
+                }
+            }
+            Toggle {
+                text: "Aperçus en direct des sources";
+                checked <=> Bridge.settings-previews;
+            }
+            Field {
+                label: "Raccourci : démarrer ou arrêter l'enregistrement";
+                ComboBox {
+                    model: Bridge.hotkey-choices;
+                    current-index <=> Bridge.hotkey-record-index;
+                }
+            }
+            Field {
+                label: "Raccourci : afficher ou réduire Polyptyque";
+                ComboBox {
+                    model: Bridge.hotkey-choices;
+                    current-index <=> Bridge.hotkey-show-index;
+                }
+            }
+            Field {
+                label: "Raccourci : activer ou couper les aperçus";
+                ComboBox {
+                    model: Bridge.hotkey-choices;
+                    current-index <=> Bridge.hotkey-previews-index;
+                }
+            }
+        }
+    }
+    if Bridge.settings-error != "": Note {
+        tone: 3;
+        text: Bridge.settings-error;
+    }
+    Footer {
+        ActionButton {
+            text: "Annuler";
+            kind: "ghost";
+            clicked => {
+                Bridge.close-sheet();
+            }
+        }
+        ActionButton {
+            text: "Enregistrer";
+            kind: "primary";
+            clicked => {
+                Bridge.save-settings();
+            }
+        }
+    }
+}
+
+// Opération en cours (recherche de l'encodeur, finalisation des fichiers…).
+export component BusyOverlay inherits Rectangle {
+    background: Theme.backdrop;
+    TouchArea { }
+    Rectangle {
+        width: 420px;
+        height: 150px;
+        background: Theme.surface;
+        border-radius: 14px;
+        border-width: 1px;
+        border-color: Theme.border;
+        VerticalLayout {
+            padding: 24px;
+            spacing: 16px;
+            alignment: center;
+            HorizontalLayout {
+                alignment: center;
+                Spinner {
+                    indeterminate: true;
+                    width: 36px;
+                    height: 36px;
+                }
+            }
+            Text {
+                text: Bridge.busy-text;
+                color: Theme.text;
+                horizontal-alignment: center;
+                wrap: word-wrap;
+            }
+        }
+    }
+}
+
+// Message temporaire en bas de la fenêtre.
+export component Toast inherits Rectangle {
+    width: min(row.preferred-width, 760px);
+    height: row.preferred-height;
+    border-radius: Theme.radius;
+    background: Theme.surface-raised;
+    border-width: 1px;
+    border-color: Theme.tone-color(Bridge.toast-tone).with-alpha(0.6);
+    drop-shadow-blur: 24px;
+    drop-shadow-color: #00000080;
+
+    row := HorizontalLayout {
+        padding: 12px;
+        padding-left: 16px;
+        spacing: 12px;
+        Rectangle {
+            width: 8px;
+            height: 8px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 4px;
+            background: Theme.tone-color(Bridge.toast-tone);
+        }
+        Text {
+            text: Bridge.toast-text;
+            color: Theme.text;
+            wrap: word-wrap;
+            vertical-alignment: center;
+            max-width: 680px;
+        }
+    }
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            Bridge.dismiss-toast();
+        }
+    }
+}

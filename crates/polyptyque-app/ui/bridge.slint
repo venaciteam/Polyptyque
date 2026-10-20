@@ -1,0 +1,135 @@
+// Seul lien entre l'interface et le reste du logiciel : des données à
+// afficher et des actions à déclencher. Une autre interface pourrait
+// remplacer celle-ci en utilisant exactement le même « pont ».
+
+export struct SceneItem {
+    id: string,
+    name: string,
+    count: int,
+    active: bool,
+}
+
+export struct SourceItem {
+    id: string,
+    name: string,
+    kind: string,
+    browser: bool,
+}
+
+export struct SourceCard {
+    id: string,
+    name: string,
+    kind: string,
+    state: string,
+    // 0 neutre, 1 bon, 2 attention, 3 erreur
+    tone: int,
+    preview: image,
+    has-preview: bool,
+    placeholder: string,
+    level: float,
+    sound: bool,
+    size: string,
+    dropped: int,
+    warning: string,
+    can-open: bool,
+}
+
+export struct WindowItem {
+    title: string,
+    program: string,
+    browser: bool,
+}
+
+export global Bridge {
+    // État général.
+    in property <bool> recording;
+    in property <string> elapsed: "00:00:00";
+    in property <string> disk-text;
+    in property <bool> disk-warning;
+    in property <string> encoder-text;
+    in property <string> busy-text;
+    in property <string> toast-text;
+    in property <int> toast-tone;
+    in property <bool> previews-enabled: true;
+    in property <string> version;
+
+    // Scènes et sources de la scène active.
+    in property <[SceneItem]> scenes;
+    in property <string> scene-name;
+    in property <[SourceItem]> sources;
+    in property <[SourceCard]> cards;
+    in-out property <int> selected-source: -1;
+
+    // Feuille ouverte : "", "browser", "application", "settings",
+    // "scene-new", "scene-rename", "confirm".
+    in-out property <string> sheet;
+
+    // Ajout d'une source navigateur.
+    in property <[string]> browser-choices;
+    in-out property <int> browser-index;
+    in-out property <string> browser-path;
+    in-out property <string> new-name;
+    in-out property <string> new-url;
+    in-out property <bool> open-now: true;
+
+    // Ajout d'une source application.
+    in property <[WindowItem]> windows;
+    in-out property <int> window-index: -1;
+    in-out property <bool> relaunch;
+    in-out property <bool> capture-cursor: true;
+
+    // Scène : nom saisi.
+    in-out property <string> scene-name-input;
+
+    // Confirmation.
+    in property <string> confirm-title;
+    in property <string> confirm-text;
+    in property <string> confirm-button;
+
+    // Réglages.
+    in property <[string]> resolution-choices;
+    in-out property <int> resolution-index;
+    in property <[string]> fps-choices;
+    in-out property <int> fps-index;
+    in-out property <string> bitrate-text;
+    in property <[string]> codec-choices;
+    in-out property <int> codec-index;
+    in property <[string]> hardware-choices;
+    in-out property <int> hardware-index;
+    in property <[string]> audio-choices;
+    in-out property <int> audio-index;
+    in-out property <string> output-dir;
+    in-out property <string> template;
+    in-out property <bool> settings-previews;
+    in property <[string]> hotkey-choices;
+    in-out property <int> hotkey-record-index;
+    in-out property <int> hotkey-show-index;
+    in-out property <int> hotkey-previews-index;
+    in property <bool> can-browse;
+    in property <string> settings-error;
+
+    // Actions.
+    callback start-stop();
+    callback select-scene(string);
+    callback request-new-scene();
+    callback request-rename-scene();
+    callback request-delete-scene();
+    callback confirm-scene-name();
+    callback request-add-browser();
+    callback confirm-add-browser();
+    callback request-add-application();
+    callback refresh-windows();
+    callback window-selected(int);
+    callback confirm-add-application();
+    callback request-remove-source();
+    callback move-source(int);
+    callback open-source(string);
+    callback open-settings();
+    callback browse-output();
+    callback save-settings();
+    callback open-output-folder();
+    callback toggle-previews();
+    callback close-sheet();
+    callback confirm-accepted();
+    callback dismiss-toast();
+}

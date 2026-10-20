@@ -7,8 +7,8 @@ multi-angle et l'archivage, sur des sessions pouvant durer 12 heures.
 Windows d'abord ; architecture prévue pour macOS et Linux.
 
 > [!NOTE]
-> Projet au stade de prototype (étape 0) : moteur d'enregistrement piloté par
-> une console. L'interface graphique viendra ensuite.
+> Projet en développement : moteur validé (étape 0), interface graphique en
+> cours (étape 2).
 
 ## Documentation
 
@@ -22,7 +22,8 @@ Windows d'abord ; architecture prévue pour macOS et Linux.
 | `crates/polyptyque-core` | Modèle de données, nommage, synchronisation, commandes FFmpeg (tout système) |
 | `crates/polyptyque-windows` | Capture d'image et de son, fenêtres, navigateurs (Windows) |
 | `crates/polyptyque-engine` | Sessions d'enregistrement, fils de capture, encodeurs |
-| `crates/polyptyque-cli` | Prototype en console |
+| `crates/polyptyque-app` | Interface graphique ([Slint](https://slint.dev)) ; apparence dans `ui/`, thème dans `ui/theme.slint` |
+| `crates/polyptyque-cli` | Version en console (prototype de l'étape 0) |
 
 ## Branches
 
@@ -40,7 +41,8 @@ En local :
 
 ```sh
 cargo test --workspace          # tests, dont une session simulée (FFmpeg requis)
-cargo build --release -p polyptyque-cli
+cargo build --release -p polyptyque-app -p polyptyque-cli
+cargo run -p polyptyque-app     # hors Windows : mode démonstration (fausses fenêtres)
 ```
 
 ## Licence

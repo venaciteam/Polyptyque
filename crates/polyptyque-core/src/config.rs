@@ -9,8 +9,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
+use crate::browsers::program_name;
 use crate::naming::DEFAULT_TEMPLATE;
 use crate::paths;
+use crate::platform::WindowInfo;
 
 pub const CONFIG_VERSION: u32 = 1;
 
@@ -138,11 +140,57 @@ pub struct Source {
 }
 
 impl Source {
+    /// Source navigateur avec un profil dédié, rangé dans `profiles_root`.
+    pub fn browser(name: &str, browser: BrowserRef, start_url: Option<&str>, profiles_root: &Path) -> Self {
+        let id = new_id();
+        Self {
+            name: name.trim().to_string(),
+            capture_cursor: true,
+            relaunch: true,
+            kind: SourceKind::Browser {
+                profile_dir: profiles_root.join(&id),
+                start_url: start_url.map(|u| u.trim().to_string()).filter(|u| !u.is_empty()),
+                browser,
+            },
+            id,
+        }
+    }
+
+    /// Source application d'après une fenêtre ouverte.
+    pub fn application(name: &str, window: &WindowInfo, relaunch: bool, capture_cursor: bool) -> Self {
+        Self {
+            id: new_id(),
+            name: name.trim().to_string(),
+            capture_cursor,
+            relaunch,
+            kind: SourceKind::Application {
+                exe_path: window.exe.clone(),
+                window_class: window.class.clone(),
+                window_title: window.title.clone(),
+                launch_args: Vec::new(),
+            },
+        }
+    }
+
     pub fn should_launch(&self) -> bool {
         match self.kind {
             SourceKind::Browser { .. } => true,
             SourceKind::Application { .. } => self.relaunch,
         }
+    }
+
+    /// Description courte : « Navigateur Firefox », « Application Discord ».
+    pub fn kind_label(&self) -> String {
+        match &self.kind {
+            SourceKind::Browser { browser, .. } => format!("Navigateur {}", browser.name),
+            SourceKind::Application { exe_path, .. } => {
+                format!("Application {}", program_name(exe_path).unwrap_or_default())
+            }
+        }
+    }
+
+    pub fn is_browser(&self) -> bool {
+        matches!(self.kind, SourceKind::Browser { .. })
     }
 }
 
@@ -187,8 +235,11 @@ pub enum BrowserFamily {
 pub struct Settings {
     pub output_dir: PathBuf,
     pub filename_template: String,
+    /// Aperçus en direct des sources dans l'interface.
+    pub previews: bool,
     pub video: VideoSettings,
     pub audio: AudioSettings,
+    pub hotkeys: HotkeySettings,
 }
 
 impl Default for Settings {
@@ -196,8 +247,29 @@ impl Default for Settings {
         Self {
             output_dir: paths::default_output_dir(),
             filename_template: DEFAULT_TEMPLATE.to_string(),
+            previews: true,
             video: VideoSettings::default(),
             audio: AudioSettings::default(),
+            hotkeys: HotkeySettings::default(),
+        }
+    }
+}
+
+/// Raccourcis clavier globaux, au format « Ctrl+Maj+F9 » (vide : aucun).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct HotkeySettings {
+    pub toggle_recording: String,
+    pub show_window: String,
+    pub toggle_previews: String,
+}
+
+impl Default for HotkeySettings {
+    fn default() -> Self {
+        Self {
+            toggle_recording: "Ctrl+Maj+F9".into(),
+            show_window: "Ctrl+Maj+F10".into(),
+            toggle_previews: "Ctrl+Maj+F11".into(),
         }
     }
 }
@@ -387,6 +459,43 @@ mod tests {
         assert_eq!(config.active_scene, config.scenes[0].id);
         assert_eq!(config.settings.video.width, 1920);
         assert_eq!(config.settings.video.fps, 1);
+    }
+
+    #[test]
+    fn source_constructors() {
+        let browser = BrowserRef {
+            name: "Firefox".into(),
+            exe_path: PathBuf::from(r"C:\ff\firefox.exe"),
+            family: BrowserFamily::Gecko,
+        };
+        let source = Source::browser(" Firefox A ", browser, Some("  "), Path::new("/profils"));
+        assert_eq!(source.name, "Firefox A");
+        assert_eq!(source.kind_label(), "Navigateur Firefox");
+        match &source.kind {
+            SourceKind::Browser { profile_dir, start_url, .. } => {
+                assert_eq!(profile_dir, &Path::new("/profils").join(&source.id));
+                assert!(start_url.is_none());
+            }
+            _ => panic!("source navigateur attendue"),
+        }
+        let window = WindowInfo {
+            handle: 1,
+            pid: 2,
+            title: "Discord".into(),
+            class: "Chrome_WidgetWin_1".into(),
+            exe: PathBuf::from(r"C:\d\Discord.exe"),
+        };
+        let app = Source::application("Discord", &window, false, true);
+        assert_eq!(app.kind_label(), "Application Discord");
+        assert!(!app.should_launch());
+    }
+
+    #[test]
+    fn older_config_gets_new_defaults() {
+        let text = "version = 1\nactive_scene = \"x\"\n[settings]\noutput_dir = \"/tmp\"\n";
+        let config: Config = toml::from_str(text).unwrap();
+        assert!(config.settings.previews);
+        assert_eq!(config.settings.hotkeys.toggle_recording, "Ctrl+Maj+F9");
     }
 
     #[test]
