@@ -37,11 +37,13 @@ type: projet
 	10. [[#Interface]]
 	11. [[#Raccourcis clavier]]
 	12. [[#Préparation de la diffusion en direct]]
+	13. [[#Installation]]
 5. [[#Exigences non fonctionnelles]]
 	1. [[#Fiabilité]]
 	2. [[#Performance]]
 	3. [[#Compatibilité]]
 	4. [[#Sécurité et vie privée]]
+	5. [[#Distribution et licence]]
 6. [[#Limites connues]]
 7. [[#Architecture technique]]
 	1. [[#Chaîne de traitement]]
@@ -154,7 +156,7 @@ graph TD
 
 - **Un profil dédié par source**, stocké dans le dossier de données de Polyptyque (`%LOCALAPPDATA%\Polyptyque\profils\<identifiant>`).
 - **Connexions conservées** : le profil est permanent, l'utilisateur ne se connecte qu'une fois par profil.
-- **Restauration des onglets** : Polyptyque configure le profil pour rouvrir les onglets de la session précédente (Firefox : `browser.startup.page = 3` ; Chromium : « Continuer là où vous vous êtes arrêté »).
+- **Restauration des onglets** : Polyptyque configure le profil pour rouvrir les onglets de la session précédente (Firefox : préférence `browser.startup.page = 3` ; Chromium : option de lancement `--restore-last-session`).
 - **Adresse de départ** optionnelle, utilisée au premier lancement du profil.
 
 > [!warning] Règle d'or des profils
@@ -260,6 +262,11 @@ Réglages **communs à toutes les sources** dans la version 1.
 
 Inspirée d'[[OBS Studio]], volontairement allégée, thème sombre.
 
+> [!important] Exigences de conception
+> - **Légèreté** : l'interface ne doit pas alourdir le logiciel. Pas de page web embarquée ; une interface native dessinée par la carte graphique.
+> - **Épurée et esthétique** : peu d'éléments à l'écran, hiérarchie claire.
+> - **Facilement remplaçable** : l'apparence est décrite dans des fichiers séparés de la logique, et l'interface ne communique avec le moteur que par une interface de programmation unique (démarrer, suivre, arrêter). Changer l'apparence, voire toute l'interface, ne touche pas au moteur.
+
 ```text
 ┌────────────────────────────────────────────────────────────┐
 │ Polyptyque                               ● REC  02:14:37   │
@@ -303,6 +310,29 @@ Inspirée d'[[OBS Studio]], volontairement allégée, thème sombre.
 
 Non développée en version 1. L'architecture sépare **l'encodage** de **la destination** : chaque flux encodé est envoyé vers une ou plusieurs « sorties ». Seule la sortie « fichier » existe en version 1 ; une sortie « diffusion » (RTMP, SRT) pourra être ajoutée sans refonte.
 
+### Installation
+
+> [!important] Exigences
+> - **Un seul fichier `.exe`**, le plus autonome possible.
+> - **Aucune question** sauf nécessité réelle.
+> - Clair, simple et **agréable visuellement**.
+> - Priorité forte en cas de publication.
+
+Solution retenue : **[[Velopack]]** (outil d'installation et de mise à jour écrit en Rust, licence MIT, maintenu activement).
+
+| Point | Comportement |
+|---|---|
+| Fichier livré | Un seul `Setup.exe` |
+| Questions posées | Aucune : installation dans le dossier de l'utilisateur, puis lancement de Polyptyque |
+| Droits administrateur | Non requis (pas d'alerte UAC) |
+| Apparence | Image d'accueil personnalisable (fixe ou animée) pendant l'installation ; pas de thème de couleurs |
+| Mises à jour | Automatiques, depuis les publications GitHub |
+| Surcoût | Environ 7,5 Mo pour l'installateur, 5 Mo pour l'outil de mise à jour |
+| macOS / Linux | Paquet `.pkg` sous macOS (fabriqué sur un Mac), AppImage auto-mise à jour sous Linux |
+
+> [!note] Alternative écartée
+> Inno Setup 7 propose un style moderne (clair/sombre) mais repose sur un assistant à plusieurs pages et n'a pas de mise à jour automatique.
+
 ---
 
 ## Exigences non fonctionnelles
@@ -329,6 +359,7 @@ Non développée en version 1. L'architecture sépare **l'encodage** de **la des
 | Élément | Exigence |
 |---|---|
 | Système | Windows 10 22H2 et Windows 11, 64 bits |
+| Pilote NVIDIA | 570 ou plus récent avec FFmpeg 8.1 (FFmpeg 9 exigerait 610 ou plus) |
 | Son isolé par programme | Windows 10 version 2004 ou plus récent (la documentation Microsoft indique la build 20348) |
 | Bordure jaune de capture | Retirée quand Windows le permet (Windows 11) ; affichée sinon, sans contournement |
 | Encodeurs | Détection au démarrage de NVENC, AMF, Quick Sync ; encodeur logiciel en secours |
@@ -344,6 +375,21 @@ Non développée en version 1. L'architecture sépare **l'encodage** de **la des
 - Les profils de navigateur contiennent des **sessions connectées** : stockés uniquement en local, jamais transmis.
 - Microphone désactivé par défaut, activation explicite.
 - Aucune donnée envoyée sur Internet par Polyptyque (proposition, voir [[#Questions ouvertes]]).
+
+### Distribution et licence
+
+- **Gratuit.**
+- **Code source ouvert**, licence **GPL v3 ou ultérieure**. Imposée de fait par FFmpeg compilé avec l'encodeur x264 (meilleur encodeur par le processeur), elle a été acceptée.
+- **Pas de signature numérique payante.**
+
+> [!warning] Conséquences de l'absence de signature
+> - **SmartScreen** : au téléchargement, Windows affiche « Windows a protégé votre ordinateur ». L'utilisateur doit cliquer sur « Informations complémentaires » puis « Exécuter quand même ». Chaque nouvelle version repart de zéro en réputation.
+> - **Smart App Control** (Windows 11) : quand il est actif, il **bloque totalement** les programmes non signés, sans contournement possible pour un programme isolé ; il faudrait désactiver la fonction. Cela concerne aussi `ffmpeg.exe` et l'outil de mise à jour.
+
+> [!tip] Piste gratuite : SignPath Foundation
+> [SignPath Foundation](https://signpath.org/) signe **gratuitement** les projets open source (environ 330 projets, dont Vim et VSCodium). Conditions principales : licence reconnue par l'OSI sans double licence commerciale, projet maintenu et **déjà publié**, fabrication vérifiable depuis le code source (GitHub Actions), double authentification pour l'équipe, page de politique de signature. Le certificat est au nom de la fondation.
+> Points à traiter : pas d'intégration officielle avec Velopack (script de signature à écrire) ; `ffmpeg.exe` devra être compilé par le projet pour être signé.
+> Option payante de repli : certificat Certum « Open Source Developer », à partir de 69 €.
 
 ---
 
@@ -392,12 +438,12 @@ Le code est organisé en modules indépendants (« crates » Rust) :
 
 | Module | Rôle | Dépend du système |
 |---|---|---|
-| `core` | Scènes, sources, réglages, sauvegarde, horloge, nommage, orchestration | Non |
-| `capture` | Interface commune de capture vidéo et audio | Non |
-| `capture-windows` | Implémentation Windows de la capture | **Oui** |
-| `encode` | Encodeurs, multiplexage MKV, conversion MP4 | Non (sauf détection matérielle) |
-| `browsers` | Détection des navigateurs, profils, lancement | Partiellement |
-| `app` | Interface graphique | Non |
+| `polyptyque-core` | Scènes, sources, réglages, sauvegarde, nommage, calculs de synchronisation, commandes FFmpeg, et le contrat `Platform` que chaque système doit remplir | Non |
+| `polyptyque-windows` | Implémentation Windows de `Platform` : capture d'image et de son, fenêtres, processus, navigateurs installés, tubes | **Oui** |
+| `polyptyque-engine` | Sessions d'enregistrement : fils de capture, horloge commune, encodeurs, arrêt propre | Non |
+| `polyptyque-cli` | Prototype en console (étape 0), remplacé ensuite par l'interface graphique | Non |
+
+La session simulée (`polyptyque-engine/tests`) rejoue un enregistrement complet avec de fausses fenêtres et un vrai FFmpeg, sur n'importe quel système : elle vérifie à chaque modification les durées et la synchronisation des fichiers produits.
 
 ### Technologies
 
@@ -407,45 +453,52 @@ Le code est organisé en modules indépendants (« crates » Rust) :
 | Accès à Windows | Crate officielle Microsoft `windows` | |
 | Capture vidéo | Windows.Graphics.Capture | Capture par fenêtre, même cachée derrière d'autres |
 | Capture audio | WASAPI « process loopback », mode arbre de processus | Son d'un programme et de ses sous-programmes |
-| Encodage et MKV | Bibliothèques [[FFmpeg]] (liaison dynamique, version LGPL) | NVENC, AMF, Quick Sync, logiciel |
-| Interface | Interface native dessinée par la carte graphique (egui ou Slint, à trancher à l'étape 2) | Pas de page web embarquée, pour afficher plusieurs aperçus vidéo sans coût excessif |
+| Encodage et MKV | [[FFmpeg]] 8.1 (version GPL) : un processus par source, alimenté par deux tubes nommés (image NV12, son flottant) | NVENC, AMF, Quick Sync, x264 ; une panne d'encodeur n'affecte qu'une source |
+| Conversion d'image | Processeur vidéo Direct3D 11 de la carte graphique | Mise à l'échelle et conversion NV12 BT.709 sans passer par le processeur |
+| Interface | [[Slint]] (recommandé) | Apparence décrite dans des fichiers `.slint` séparés de la logique ; compatible GPL v3 ; accessibilité via AccessKit ; aperçus par tampons d'image |
+| Installateur | [[Velopack]] | Un seul `Setup.exe`, sans question, mises à jour automatiques |
 | Sauvegarde des scènes | Fichier de configuration dans `%APPDATA%\Polyptyque` | |
 | Fabrication des exécutables | GitHub Actions sur machine Windows | |
 
 ### Portage macOS et Linux
 
-Seul le module `capture-…` est à réécrire pour chaque système, ainsi qu'une partie de `browsers` (emplacements des navigateurs). Pistes à étudier le moment venu : ScreenCaptureKit sous macOS, PipeWire sous Linux. L'isolation du son par programme y sera à revérifier.
+Seule une implémentation de `Platform` est à écrire pour chaque système (`polyptyque-macos`, `polyptyque-linux`). Pistes à étudier le moment venu : ScreenCaptureKit sous macOS, PipeWire sous Linux. L'isolation du son par programme y sera à revérifier.
 
 ---
 
 ## Feuille de route
 
-> [!todo] Étape 0 - Prototype de validation des risques
-> - [ ] Son isolé par profil : deux fenêtres Firefox et deux fenêtres Chrome, sons différents, fichiers propres
-> - [ ] Retrait de la bordure jaune sous Windows 11
+> [!todo] Étape 0 - Prototype (moteur et console), écrit le 2026-10-20
+> - [x] Moteur : capture, horloge commune, cadence constante, encodage, MKV (validé en simulation)
+> - [x] Fenêtres perdues et rattachement automatique, surveillance du disque, anti-veille, journaux
+> - [x] Navigateurs gérés : détection, profils dédiés, lancement, restauration des onglets, reconnaissance
+> - [ ] Validation sur la machine de référence : son isolé par profil (Firefox, Chrome), Discord, bordure jaune
 > - [ ] Nombre de flux 1080p60 encodables en parallèle sur la RTX 3080
 > - [ ] Test d'endurance de 1 h, puis de 12 h ; vérification de la synchronisation et de la lisibilité des fichiers
 
-> [!todo] Étape 1 - Moteur d'enregistrement
-> - [ ] Capture, horloge commune, cadence constante, encodage, MKV
-> - [ ] Gestion des fenêtres perdues et rattachement automatique
-> - [ ] Surveillance du disque, anti-veille, journal technique
+> [!todo] Étape 1 - Robustesse du moteur (selon les retours de l'étape 0)
+> - [ ] Relance automatique d'un encodeur arrêté (nouvelle partie de fichier)
+> - [ ] Enregistrement individuel d'une source
+> - [ ] Microphone, conversion MP4
 
-> [!todo] Étape 2 - Interface
+> [!todo] Étape 2 - Interface graphique ([[Slint]])
 > - [ ] Scènes, sources, grille d'aperçus, paramètres, nommage
-> - [ ] Verrouillage pendant l'enregistrement
+> - [ ] Verrouillage pendant l'enregistrement, raccourcis globaux
 
-> [!todo] Étape 3 - Navigateurs gérés
-> - [ ] Détection, profils dédiés, lancement, restauration des onglets, reconnaissance au démarrage
+> [!todo] Étape 3 - Installateur ([[Velopack]])
+> - [ ] `Setup.exe` unique avec image d'accueil, mises à jour automatiques
 
-> [!todo] Étape 4 - Finitions et fiabilité
-> - [ ] Microphone, raccourcis globaux, conversion MP4
-> - [ ] Tests d'endurance de 12 h complets, installateur
+> [!todo] Étape 4 - Publication
+> - [ ] Dépôt public, première version publiée
+> - [ ] FFmpeg compilé par le projet (plus léger, signable)
+> - [ ] Demande de signature gratuite à SignPath Foundation
+> - [ ] Tests d'endurance de 12 h complets
 
 > [!info] Plus tard
 > - Diffusion en direct (gratuite)
 > - Portage macOS, puis Linux
 > - Réglages d'encodage par source
+> - Chemin « zéro copie » : encodage directement depuis la mémoire de la carte graphique
 
 ---
 
@@ -466,19 +519,22 @@ Seul le module `capture-…` est à réécrire pour chaque système, ainsi qu'un
 | 2026-10-20 | Bouton d'enregistrement global et enregistrement individuel par source |
 | 2026-10-20 | Diffusion en direct hors version 1, architecture prête, gratuite si ajoutée |
 | 2026-10-20 | Modèle de nom par défaut : `{date}_{heure}_{scène}_{source}` |
+| 2026-10-20 | Logiciel **gratuit**, **open source**, licence GPL v3 ou ultérieure |
+| 2026-10-20 | Pas de signature payante ; piste SignPath Foundation (gratuite) à la publication |
+| 2026-10-20 | Installateur : un seul `.exe`, sans question, agréable → [[Velopack]] |
+| 2026-10-20 | Interface légère, épurée, facilement remplaçable → [[Slint]] recommandé |
+| 2026-10-20 | Encodage par un processus FFmpeg 8.1 par source (pilotes NVIDIA 570+) |
 
 ---
 
 ## Questions ouvertes
 
-- [ ] **Distribution du logiciel** : gratuit ou payant ? Code source ouvert ou fermé ? Impacts :
-	- l'encodeur logiciel de référence (x264) impose de publier le code source de Polyptyque ; l'alternative libre de cette contrainte (OpenH264) offre une qualité moindre ;
-	- une signature numérique de l'exécutable évite l'alerte « Windows a protégé votre ordinateur », pour un coût annuel.
 - [ ] **Restauration au démarrage** : proposition de ne relancer que les sources de la scène active (et non de toutes les scènes).
 - [ ] **Télémétrie** : proposition d'aucune collecte de données.
 - [ ] **Format du fichier micro** : `.mka` envisagé, compatibilité montage à vérifier.
-- [ ] **Débit vidéo par défaut** : à fixer après mesures sur la machine de référence.
-- [ ] **Technologie d'interface** : egui ou Slint, à trancher à l'étape 2.
+- [ ] **Débit vidéo par défaut** : à fixer après mesures sur la machine de référence (12 000 kb/s provisoire).
+- [ ] **Technologie d'interface** : [[Slint]] recommandé, à confirmer au début de l'étape 2.
+- [x] ~~Distribution du logiciel~~ : gratuit, open source (GPL v3), sans signature payante.
 
 ---
 
@@ -493,4 +549,10 @@ Seul le module `capture-…` est à réécrire pour chaque système, ainsi qu'un
 - [Tor Browser - Effacement des cookies à la fermeture](https://gitlab.torproject.org/tpo/applications/tor-browser/-/issues/33540)
 - [Adobe - Retour du support MKV dans Premiere Pro](https://community.adobe.com/t5/premiere-pro-ideas/what-happened-to-mkv-support-it-was-in-beta-2024-but-it-s-not-in-2025/idi-p/15080697)
 - [windows-capture (crate Rust)](https://github.com/NiiightmareXD/windows-capture)
+- [Velopack - Installateur](https://docs.velopack.io/packaging/installer)
+- [Slint - Licences](https://github.com/slint-ui/slint/blob/master/LICENSE.md)
+- [SignPath Foundation - Conditions](https://signpath.org/terms)
+- [Microsoft - Smart App Control](https://learn.microsoft.com/en-us/windows/apps/develop/smart-app-control/overview)
+- [Microsoft - Réputation SmartScreen](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation)
+- [BtbN FFmpeg-Builds - En-têtes NVIDIA par version](https://github.com/BtbN/FFmpeg-Builds/blob/master/scripts.d/50-ffnvcodec.sh)
 - [wasapi-rs (crate Rust)](https://github.com/HEnquist/wasapi-rs)
