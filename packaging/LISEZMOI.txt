@@ -36,7 +36,11 @@ Utilisation
 3. Sources → « Application » : choisir une fenêtre ouverte (Discord, jeu,
    Tor Browser…).
 4. « Démarrer l'enregistrement ». Polyptyque retrouve ou rouvre les fenêtres,
-   puis affiche l'état de chaque source. « Arrêter » finalise les fichiers.
+   puis affiche l'état de chaque source. « Tout arrêter » finalise les
+   fichiers.
+5. Le bouton rond de chaque aperçu démarre ou arrête cette seule source,
+   même pendant un enregistrement (une source ajoutée en cours de route
+   commence un nouveau fichier).
 
 Raccourcis clavier (modifiables dans les réglages, actifs même quand
 Polyptyque est en arrière-plan) :
@@ -47,6 +51,21 @@ Polyptyque est en arrière-plan) :
 Les fichiers sont dans le dossier Vidéos\Polyptyque (modifiable dans les
 réglages), un fichier MKV par source.
 
+Montage (Premiere Pro…)
+-----------------------
+« Convertir en MP4… » crée une copie MP4 sans perte de qualité à côté de
+chaque MKV choisi (le MKV est conservé). Les réglages permettent aussi de
+convertir automatiquement à la fin de chaque enregistrement. La copie
+double la place occupée sur le disque.
+
+Micro
+-----
+Désactivé par défaut. Dans les réglages : « Enregistrer mon micro dans un
+fichier séparé », puis choisir le micro. Le son du micro est enregistré
+dans « …_Micro.mka » (converti en .m4a pour le montage). Windows doit
+autoriser l'accès au micro pour les applications de bureau : Paramètres >
+Confidentialité et sécurité > Microphone.
+
 À savoir
 --------
 - Une fenêtre réduite dans la barre des tâches ne se filme plus (image
@@ -56,6 +75,12 @@ réglages), un fichier MKV par source.
 - La mise en veille est bloquée pendant l'enregistrement.
 - Fermer Polyptyque pendant un enregistrement demande une confirmation,
   puis finalise les fichiers avant de quitter.
+- Éteindre ou redémarrer Windows pendant un enregistrement : Windows affiche
+  que Polyptyque enregistre et permet d'annuler. Si l'arrêt est forcé, les
+  fichiers sont finalisés au mieux avant la fermeture.
+- Si l'encodeur s'arrête en cours de route, Polyptyque le relance tout seul :
+  la suite est dans un fichier « …_partie2.mkv » (environ une seconde
+  perdue entre les deux).
 
 En cas de problème
 ------------------

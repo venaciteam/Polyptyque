@@ -190,23 +190,32 @@ Au lancement de Polyptyque, pour chaque source de la scène active :
 ### Enregistrement
 
 - **Bouton global** : démarre toutes les sources de la scène active **au même instant**, sur une **horloge commune**.
-- **Enregistrement individuel** : chaque source peut aussi être démarrée ou arrêtée seule.
+- **Enregistrement individuel** : chaque source peut aussi être démarrée ou arrêtée seule, par le bouton de sa carte.
+	- Hors enregistrement, le bouton d'une carte démarre cette seule source.
+	- Pendant un enregistrement, une source arrêtée est finalisée en arrière-plan pendant que les autres continuent ; une source ajoutée en cours de route commence un **nouveau fichier**, nommé d'après son heure de départ.
+	- Arrêter la dernière source termine l'enregistrement. Le bouton principal devient « Tout arrêter ».
 - **Cadence constante** : Windows n'envoie une image que lorsque la fenêtre change ; Polyptyque répète la dernière image pour garantir une cadence fixe (indispensable aux logiciels de montage).
 - **Son continu** : les silences sont comblés pour que le son reste calé sur l'image.
 - **Fenêtre perdue** (fermée, plantée) : le fichier continue avec une **image noire et du silence** ; la source est **rattachée automatiquement** dès que la fenêtre réapparaît.
 - **Fenêtre réduite** : Windows ne la dessine plus, l'image se fige ; un avertissement s'affiche.
 - **Fenêtre redimensionnée** : la résolution du fichier reste fixe, l'image est mise à l'échelle en conservant ses proportions, avec des bandes noires si besoin.
 - **Mise en veille de Windows bloquée** pendant l'enregistrement.
+- **Encodeur arrêté ou figé** (plantage de FFmpeg, pilote, 30 s sans avancer) : la capture continue et un nouvel encodeur reprend dans un nouveau fichier `…_partie2.mkv`, image et son recalés au même instant. Trois échecs d'affilée dès le démarrage arrêtent la source, pour ne pas tourner en boucle.
+- **Arrêt, redémarrage ou déconnexion de Windows** pendant un enregistrement : Polyptyque le signale à Windows, qui l'affiche dans son écran d'arrêt et permet d'annuler. Si l'arrêt continue malgré tout, les fichiers sont finalisés avant la fermeture. Un arrêt critique (batterie épuisée) n'est jamais bloqué.
 
 ### Microphone
 
 - **Désactivé par défaut.**
 - Activation dans les réglages, avec **demande de confirmation explicite** à l'utilisateur, en respectant les autorisations de confidentialité de Windows.
 - Choix du périphérique d'entrée.
-- Enregistré dans un **fichier audio séparé**, sur la même horloge que les vidéos.
+- Choix du micro par défaut de Windows ou d'un micro précis ; un micro choisi puis débranché reste mémorisé et proposé.
+- Enregistré dans un **fichier audio séparé**, sur la même horloge que les vidéos, pendant toute la durée de l'enregistrement.
+- Micro débranché puis rebranché : repris automatiquement (silence en attendant).
+- Accès refusé par Windows (réglage de confidentialité) : détecté et expliqué, avec un raccourci vers le bon écran des Paramètres.
 
-> [!question] Format du fichier micro
-> Le WAV classique est limité à 4 Go, soit environ 6 h en stéréo 48 kHz 16 bits : insuffisant pour 12 h. Piste envisagée : conteneur Matroska audio (`.mka`), avec la même robustesse que les vidéos. Compatibilité avec les logiciels de montage à vérifier.
+> [!info] Format du fichier micro
+> Pendant l'enregistrement : Matroska audio (`…_Micro.mka`, son AAC), avec la même robustesse que les vidéos. Le WAV classique était exclu : limité à 4 Go, soit environ 6 h en stéréo 48 kHz 16 bits.
+> Pour le montage : la conversion produit un `.m4a`, lu par la plupart des logiciels de montage.
 
 ### Fichiers de sortie et nommage
 
@@ -224,6 +233,8 @@ Au lancement de Polyptyque, pour chaque source de la scène active :
 
 - Modèle par défaut : `{date}_{heure}_{scène}_{source}` → `2026-10-20_14h32_Podcast_Discord.mkv`
 - **Aucun écrasement** : si le fichier existe, un suffixe numérique est ajouté.
+- Après une relance de l'encodeur, la suite est dans `…_partie2.mkv`, `…_partie3.mkv`, etc. Le titre inscrit dans le fichier indique le moment de la reprise.
+- Le micro est enregistré dans `…_Micro.mka` (variable `{source}` remplacée par « Micro »).
 - **Découpage automatique** optionnel (toutes les N heures ou N Go), désactivé par défaut.
 
 ### Conversion MKV vers MP4
@@ -234,7 +245,10 @@ Le MKV est utilisé pendant l'enregistrement pour sa robustesse : un fichier MKV
 - Déclenchement :
 	- **manuel** : sélection d'un ou plusieurs fichiers ;
 	- **automatique** (option) : conversion à la fin de chaque enregistrement, en conservant le MKV d'origine.
-- Vérification de la conversion (durée, pistes) avant de la déclarer réussie.
+- Vérification de la conversion (durée, pistes) avant de la déclarer réussie ; en cas d'échec ou d'annulation, le fichier partiel est effacé.
+- Les fichiers de son seul (`.mka`) sont convertis en `.m4a` ; le HEVC reçoit l'étiquette `hvc1` attendue par la plupart des logiciels.
+- Espace disque vérifié avant chaque fichier (la copie double la place occupée).
+- Conversion en arrière-plan, un fichier à la fois : une pastille indique l'avancement, un clic permet d'annuler, et un enregistrement peut démarrer pendant ce temps.
 
 > [!warning] À vérifier en test
 > Certains utilisateurs signalent des craquements audio après un remuxage. La conversion devra être validée sur de longs fichiers, dans [[Premiere Pro]] et [[DaVinci Resolve]].
@@ -285,7 +299,7 @@ Inspirée d'[[OBS Studio]], volontairement allégée, thème sombre.
 └──────────────┴────────────────────┴────────────────────────┘
 ```
 
-- **Grille d'aperçus** de toutes les sources de la scène, en basse définition pour ne pas pénaliser l'enregistrement, désactivable. Chaque aperçu a sa propre petite capture (384 × 216, environ 10 images par seconde), indépendante de l'enregistrement : il fonctionne aussi hors enregistrement.
+- **Grille d'aperçus** de toutes les sources de la scène, en basse définition pour ne pas pénaliser l'enregistrement, désactivable. Chaque aperçu a sa propre capture, indépendante de l'enregistrement (environ 10 images par seconde) : il fonctionne aussi hors enregistrement. Sa définition suit la taille réelle des cartes à l'écran : 640 × 360 au minimum, 960 × 540 ou 1280 × 720 pour de grandes cartes. Les fichiers enregistrés ne sont jamais concernés.
 
 > [!example]- Captures de l'interface (mode démonstration)
 > ![Aperçus](captures/interface-apercus.png)
@@ -294,6 +308,7 @@ Inspirée d'[[OBS Studio]], volontairement allégée, thème sombre.
 > ![Ajout d'une source navigateur](captures/interface-ajout-navigateur.png)
 > ![Ajout d'une source application](captures/interface-ajout-application.png)
 - Par source : nom, état, cadence réelle, indicateur de niveau sonore, durée, taille du fichier, bouton d'enregistrement individuel.
+- Barre du haut : pastille du micro (avec son niveau pendant l'enregistrement) et pastille de la conversion MP4 en cours.
 - **Barre d'état** : espace disque libre, autonomie estimée, charge processeur et carte graphique, images perdues.
 - **Fenêtre de paramètres** : Sortie, Encodage, Audio, Raccourcis, Général.
 - Langue : français au départ, textes externalisés pour permettre la traduction (public visé : grand public).
@@ -350,6 +365,8 @@ Solution retenue : **[[Velopack]]** (outil d'installation et de mise à jour éc
 - [ ] Fichiers MKV écrits au fil de l'eau, **lisibles même après un plantage** ou une coupure de courant.
 - [ ] **Désynchronisation** entre fichiers inférieure à une image (16 ms à 60 i/s) sur 12 h, à mesurer.
 - [ ] **Isolation des pannes** : une source en échec n'interrompt jamais les autres.
+- [ ] **Relance automatique** d'un encodeur arrêté ou figé, dans un nouveau fichier ; perte limitée à environ une seconde (fichiers écrits par blocs d'une seconde).
+- [ ] **Fermeture de session Windows** : arrêt bloqué avec explication, sinon fichiers finalisés avant la fermeture.
 - [ ] **Surveillance du disque** : estimation avant démarrage, alertes par paliers, arrêt propre (fichiers correctement fermés) si l'espace vient à manquer.
 - [ ] **Mémoire stable** sur 12 h (aucune fuite), vérifiée par des tests d'endurance.
 - [ ] **Journal technique** détaillé pour le diagnostic.
@@ -358,7 +375,7 @@ Solution retenue : **[[Velopack]]** (outil d'installation et de mise à jour éc
 
 - Chaîne **entièrement sur la carte graphique** quand c'est possible : capture, mise à l'échelle et encodage sans repasser par la mémoire centrale.
 - Encodage par le processeur disponible en secours, ou sur choix de l'utilisateur.
-- Aperçus en basse définition et désactivables.
+- Aperçus en définition réduite (adaptée à la taille des cartes) et désactivables.
 - Compteur d'images perdues par source.
 
 ### Compatibilité
@@ -414,6 +431,9 @@ Solution retenue : **[[Velopack]]** (outil d'installation et de mise à jour éc
 | Certains sites déconnectent après un délai | Politique des sites | Hors de contrôle |
 | Bordure jaune sur Windows 10 | Pas de méthode pour la retirer | Accepté |
 | AV1 indisponible sur RTX 30 | Matériel | Codecs proposés selon la carte détectée |
+| Plantage de l'encodeur : environ une seconde perdue | Données encore en mémoire dans FFmpeg | La suite est dans `…_partie2.mkv`, à placer au montage à la suite de la première partie |
+| Arrêt forcé de Windows sans délai | Windows peut fermer Polyptyque sans attendre | Fichiers MKV lisibles quand même ; au plus une seconde perdue |
+| Pas de protection contre l'arrêt de Windows dans la console | Seule l'interface graphique a une fenêtre pour la recevoir | Utiliser l'interface graphique |
 
 > [!bug] Point à surveiller
 > Des utilisateurs d'OBS signalent que la capture audio d'un navigateur échoue selon qu'il a été ouvert avant ou après le logiciel de capture. Comme Polyptyque lance lui-même les navigateurs, le risque est réduit, mais il sera testé explicitement.
@@ -448,9 +468,10 @@ Le code est organisé en modules indépendants (« crates » Rust) :
 | `polyptyque-core` | Scènes, sources, réglages, sauvegarde, nommage, calculs de synchronisation, commandes FFmpeg, et le contrat `Platform` que chaque système doit remplir | Non |
 | `polyptyque-windows` | Implémentation Windows de `Platform` : capture d'image et de son, fenêtres, processus, navigateurs installés, tubes | **Oui** |
 | `polyptyque-engine` | Sessions d'enregistrement : fils de capture, horloge commune, encodeurs, arrêt propre | Non |
-| `polyptyque-cli` | Prototype en console (étape 0), remplacé ensuite par l'interface graphique | Non |
+| `polyptyque-app` | Interface graphique [[Slint]] : apparence dans `ui/` (thème dans `ui/theme.slint`), logique dans `src/` ; mode démonstration hors Windows | Non (raccourcis et arrêt de Windows : oui) |
+| `polyptyque-cli` | Prototype en console (étape 0), livré à côté de l'interface pour le diagnostic | Non |
 
-La session simulée (`polyptyque-engine/tests`) rejoue un enregistrement complet avec de fausses fenêtres et un vrai FFmpeg, sur n'importe quel système : elle vérifie à chaque modification les durées et la synchronisation des fichiers produits.
+La session simulée (`polyptyque-engine/tests`) rejoue des enregistrements complets avec de fausses fenêtres, un faux micro et un vrai FFmpeg, sur n'importe quel système. Elle vérifie à chaque modification les durées et la synchronisation des fichiers produits, la conversion MP4, l'enregistrement individuel et la reprise après un **plantage réel de FFmpeg** en cours d'enregistrement.
 
 ### Technologies
 
@@ -459,8 +480,10 @@ La session simulée (`polyptyque-engine/tests`) rejoue un enregistrement complet
 | Langage | [[Rust]] | Rapide, sûr en mémoire, adapté aux traitements longs |
 | Accès à Windows | Crate officielle Microsoft `windows` | |
 | Capture vidéo | Windows.Graphics.Capture | Capture par fenêtre, même cachée derrière d'autres |
-| Capture audio | WASAPI « process loopback », mode arbre de processus | Son d'un programme et de ses sous-programmes |
-| Encodage et MKV | [[FFmpeg]] 8.1 (version GPL) : un processus par source, alimenté par deux tubes nommés (image NV12, son flottant) | NVENC, AMF, Quick Sync, x264 ; une panne d'encodeur n'affecte qu'une source |
+| Capture audio | WASAPI « process loopback », mode arbre de processus ; WASAPI classique pour le micro | Son d'un programme et de ses sous-programmes |
+| Encodage et MKV | [[FFmpeg]] 8.1 (version GPL) : un processus par source, alimenté par deux tubes nommés (image NV12, son flottant), surveillé et relancé si besoin | NVENC, AMF, Quick Sync, x264 ; une panne d'encodeur n'affecte qu'une source |
+| Conversion MP4 | [[FFmpeg]] en recopie sans réencodage (`-c copy`) | Vérification des pistes et de la durée |
+| Fermeture de session | `ShutdownBlockReasonCreate`, messages `WM_QUERYENDSESSION` et `WM_ENDSESSION` sur la fenêtre principale | |
 | Conversion d'image | Processeur vidéo Direct3D 11 de la carte graphique | Mise à l'échelle et conversion NV12 BT.709 sans passer par le processeur |
 | Interface | [[Slint]] | Apparence décrite dans des fichiers `.slint` séparés de la logique ; compatible GPL v3 ; accessibilité via AccessKit ; aperçus par tampons d'image |
 | Installateur | [[Velopack]] | Un seul `Setup.exe`, sans question, mises à jour automatiques |
@@ -485,10 +508,14 @@ Seule une implémentation de `Platform` est à écrire pour chaque système (`po
 > - [ ] Nombre de flux 1080p60 encodables en parallèle sur la RTX 3080
 > - [ ] Test d'endurance de 1 h, puis de 12 h ; vérification de la synchronisation et de la lisibilité des fichiers
 
-> [!todo] Étape 1 - Robustesse du moteur (selon les retours de l'étape 0)
-> - [ ] Relance automatique d'un encodeur arrêté (nouvelle partie de fichier)
-> - [ ] Enregistrement individuel d'une source
-> - [ ] Microphone, conversion MP4
+> [!todo] Étape 1 - Robustesse du moteur, écrite le 2026-10-20
+> - [x] Aperçus plus nets, définition adaptée à la taille des cartes
+> - [x] Relance automatique d'un encodeur arrêté ou figé (nouvelle partie de fichier), fichiers écrits par blocs d'une seconde
+> - [x] Enregistrement individuel d'une source
+> - [x] Micro optionnel dans un fichier séparé
+> - [x] Conversion MKV vers MP4 sans perte (manuelle et automatique)
+> - [x] Protection contre l'arrêt ou la déconnexion de Windows
+> - [ ] Validation sur la machine de référence
 
 > [!todo] Étape 2 - Interface graphique ([[Slint]]), écrite le 2026-10-20
 > - [x] Scènes, sources, grille d'aperçus en direct, réglages, nommage
@@ -539,6 +566,12 @@ Seule une implémentation de `Platform` est à écrire pour chaque système (`po
 | 2026-10-20 | Premier essai sur la machine de référence : capture, encodage NVENC et fichier vidéo fonctionnels |
 | 2026-10-20 | **Son isolé par fenêtre validé** sur la machine de référence (profils de navigateur dédiés) |
 | 2026-10-20 | Interface Slint : thème dans `ui/theme.slint`, interface reliée au moteur par un « pont » unique (`ui/bridge.slint`) |
+| 2026-10-20 | Aperçus : définition adaptée à la taille des cartes, 640 × 360 au minimum (384 × 216 donnait une image pixelisée) |
+| 2026-10-20 | Encodeur arrêté : relance automatique dans `…_partieN.mkv` plutôt qu'un arrêt de la source |
+| 2026-10-20 | MKV écrit par blocs d'une seconde (`-cluster_time_limit 1000 -flush_packets 1`) : un plantage ne coûte plus qu'environ une seconde |
+| 2026-10-20 | Micro : fichier `.mka` pendant l'enregistrement, `.m4a` après conversion |
+| 2026-10-20 | Enregistrement individuel : une source ajoutée en cours de route commence un nouveau fichier ; arrêter la dernière source termine l'enregistrement |
+| 2026-10-20 | Arrêt de Windows pendant un enregistrement : blocage avec explication, sinon finalisation des fichiers |
 
 ---
 
@@ -546,7 +579,7 @@ Seule une implémentation de `Platform` est à écrire pour chaque système (`po
 
 - [ ] **Restauration au démarrage** : proposition de ne relancer que les sources de la scène active (et non de toutes les scènes).
 - [ ] **Télémétrie** : proposition d'aucune collecte de données.
-- [ ] **Format du fichier micro** : `.mka` envisagé, compatibilité montage à vérifier.
+- [x] ~~Format du fichier micro~~ : `.mka` pendant l'enregistrement, `.m4a` après conversion.
 - [ ] **Débit vidéo par défaut** : à fixer après mesures sur la machine de référence (12 000 kb/s provisoire).
 - [x] ~~Distribution du logiciel~~ : gratuit, open source (GPL v3), sans signature payante.
 - [x] ~~Technologie d'interface~~ : [[Slint]].
@@ -572,3 +605,8 @@ Seule une implémentation de `Platform` est à écrire pour chaque système (`po
 - [Microsoft - Réputation SmartScreen](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation)
 - [BtbN FFmpeg-Builds - En-têtes NVIDIA par version](https://github.com/BtbN/FFmpeg-Builds/blob/master/scripts.d/50-ffnvcodec.sh)
 - [wasapi-rs (crate Rust)](https://github.com/HEnquist/wasapi-rs)
+- [Microsoft - ShutdownBlockReasonCreate](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-shutdownblockreasoncreate)
+- [Microsoft - WM_QUERYENDSESSION](https://learn.microsoft.com/en-us/windows/win32/shutdown/wm-queryendsession)
+- [Microsoft - WM_ENDSESSION](https://learn.microsoft.com/en-us/windows/win32/shutdown/wm-endsession)
+- [Microsoft - Changements de l'arrêt depuis Windows Vista](https://learn.microsoft.com/en-us/windows/win32/shutdown/shutdown-changes-for-windows-vista)
+- [oCam - Erreur 0x80070005 à l'initialisation du micro (confidentialité Windows)](https://ohsoft.net/eng/ocam_help.php?id=126)
