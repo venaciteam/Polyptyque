@@ -1,7 +1,8 @@
 //! État partagé entre les fils d'une source et l'interface.
 
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use polyptyque_core::platform::WindowInfo;
 
@@ -16,6 +17,9 @@ pub enum SourceState {
     Lost,
     /// Encodeur arrêté : la source n'enregistre plus.
     Failed,
+    /// Arrêt demandé : les dernières données sont écrites et le fichier
+    /// est fermé.
+    Finishing,
     Finished,
 }
 
@@ -27,6 +31,7 @@ impl SourceState {
             SourceState::Minimized => "Réduite",
             SourceState::Lost => "Perdue",
             SourceState::Failed => "ERREUR",
+            SourceState::Finishing => "Finalisation",
             SourceState::Finished => "Terminée",
         }
     }
@@ -38,6 +43,7 @@ impl SourceState {
             3 => SourceState::Lost,
             4 => SourceState::Failed,
             5 => SourceState::Finished,
+            6 => SourceState::Finishing,
             _ => SourceState::Searching,
         }
     }
@@ -50,6 +56,7 @@ impl SourceState {
             SourceState::Lost => 3,
             SourceState::Failed => 4,
             SourceState::Finished => 5,
+            SourceState::Finishing => 6,
         }
     }
 }
@@ -64,6 +71,16 @@ pub(crate) struct Shared {
     pub video_backlog: AtomicU64,
     /// Octets transmis à l'encodeur (sert à vérifier qu'il avance encore).
     pub bytes_sent: AtomicU64,
+    /// Position dans chaque flux depuis le départ de la source : images
+    /// et octets de son déjà pris dans les files (écrits ou perdus). Sert à
+    /// recaler image et son quand un encodeur est relancé.
+    pub video_position: Arc<AtomicU64>,
+    pub audio_position: Arc<AtomicU64>,
+    /// Partie de fichier en cours (1, puis 2 après une relance…).
+    pub part: AtomicU32,
+    outputs: Mutex<Vec<PathBuf>>,
+    finishing: AtomicBool,
+    done: AtomicBool,
     pub audio_last_sound_hns: AtomicU64,
     audio_peak_bits: AtomicU32,
     target: Mutex<Option<WindowInfo>>,
@@ -84,6 +101,12 @@ impl Shared {
             frames_dropped: AtomicU64::new(0),
             video_backlog: AtomicU64::new(0),
             bytes_sent: AtomicU64::new(0),
+            video_position: Arc::new(AtomicU64::new(0)),
+            audio_position: Arc::new(AtomicU64::new(0)),
+            part: AtomicU32::new(1),
+            outputs: Mutex::new(Vec::new()),
+            finishing: AtomicBool::new(false),
+            done: AtomicBool::new(false),
             audio_last_sound_hns: AtomicU64::new(0),
             audio_peak_bits: AtomicU32::new(0),
             target: Mutex::new(None),
@@ -95,8 +118,43 @@ impl Shared {
         }
     }
 
+    /// État affiché : un échec prime, puis l'arrêt en cours ou terminé.
     pub fn state(&self) -> SourceState {
-        SourceState::from_u8(self.state.load(Ordering::Relaxed))
+        let state = SourceState::from_u8(self.state.load(Ordering::Relaxed));
+        if state == SourceState::Failed {
+            state
+        } else if self.done.load(Ordering::SeqCst) {
+            SourceState::Finished
+        } else if self.finishing.load(Ordering::SeqCst) {
+            SourceState::Finishing
+        } else {
+            state
+        }
+    }
+
+    pub fn mark_finishing(&self) {
+        self.finishing.store(true, Ordering::SeqCst);
+    }
+
+    pub fn mark_done(&self) {
+        self.done.store(true, Ordering::SeqCst);
+    }
+
+    pub fn is_done(&self) -> bool {
+        self.done.load(Ordering::SeqCst)
+    }
+
+    /// Fichiers de la source, dans l'ordre des parties.
+    pub fn outputs(&self) -> Vec<PathBuf> {
+        lock(&self.outputs).clone()
+    }
+
+    pub fn push_output(&self, path: PathBuf) {
+        lock(&self.outputs).push(path);
+    }
+
+    pub fn remove_output(&self, path: &std::path::Path) {
+        lock(&self.outputs).retain(|p| p != path);
     }
 
     /// Un échec est définitif : il n'est jamais remplacé par un autre état.
@@ -197,6 +255,18 @@ mod tests {
         shared.set_state(SourceState::Connected);
         assert_eq!(shared.state(), SourceState::Failed);
         assert_eq!(shared.error().as_deref(), Some("premier"));
+    }
+
+    #[test]
+    fn stop_phases_are_reported() {
+        let shared = Shared::new();
+        shared.set_state(SourceState::Connected);
+        shared.mark_finishing();
+        assert_eq!(shared.state(), SourceState::Finishing);
+        shared.mark_done();
+        assert_eq!(shared.state(), SourceState::Finished);
+        shared.fail("échec".into());
+        assert_eq!(shared.state(), SourceState::Failed);
     }
 
     #[test]

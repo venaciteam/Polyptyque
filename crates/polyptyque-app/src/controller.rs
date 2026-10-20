@@ -105,8 +105,6 @@ pub struct App {
     free_space: Cell<Option<u64>>,
     last_disk_check: Cell<Option<Instant>>,
     disk_check_running: Cell<bool>,
-    /// Identifiants des sources de la session, dans l'ordre du moteur.
-    session_ids: RefCell<Vec<String>>,
     quitting: Cell<bool>,
     converter: RefCell<Option<Converter>>,
     conversion: RefCell<ConversionProgress>,
@@ -161,7 +159,6 @@ pub fn run(platform: Arc<dyn Platform>, paths: Paths, initial: Option<Config>) -
         free_space: Cell::new(None),
         last_disk_check: Cell::new(None),
         disk_check_running: Cell::new(false),
-        session_ids: RefCell::new(Vec::new()),
         quitting: Cell::new(false),
         converter: RefCell::new(None),
         conversion: RefCell::new(ConversionProgress::default()),
@@ -634,7 +631,6 @@ impl App {
         match Session::start(self.platform.clone(), plan) {
             Ok(session) => {
                 *self.session.borrow_mut() = Some(session);
-                *self.session_ids.borrow_mut() = scene.sources.iter().map(|s| s.id.clone()).collect();
                 let video = &config.settings.video;
                 let text = format!(
                     "{} · {}x{} · {} i/s · {} kb/s",
@@ -700,13 +696,14 @@ impl App {
             summaries.iter().filter_map(|s| s.error.as_ref().map(|e| format!("{} : {e}", s.name))).collect();
         let total: u64 = summaries.iter().map(|s| s.file_size).sum();
         let dir = self.config.borrow().settings.output_dir.display().to_string();
-        let mut message =
-            format!("{} fichier(s) enregistré(s), {} au total, dans {dir}.", summaries.len(), format::bytes(total));
+        let count: usize = summaries.iter().map(|s| s.outputs.len()).sum();
+        let mut message = format!("{count} fichier(s) enregistré(s), {} au total, dans {dir}.", format::bytes(total));
         if let Some(reason) = reason {
             message = format!("{reason} {message}");
         }
         if self.config.borrow().settings.convert_to_mp4 {
-            let files: Vec<PathBuf> = summaries.iter().filter(|s| s.file_size > 0).map(|s| s.output.clone()).collect();
+            let files: Vec<PathBuf> =
+                summaries.iter().flat_map(|s| s.outputs.iter().filter(|p| p.exists()).cloned()).collect();
             if !files.is_empty() {
                 message.push_str(" Conversion MP4 lancée.");
                 self.enqueue_conversions(files);
@@ -731,10 +728,9 @@ impl App {
             self.with_bridge(|b| b.set_elapsed(elapsed.into()));
             session.status()
         };
-        let ids = self.session_ids.borrow().clone();
-        for (status, id) in statuses.iter().zip(&ids) {
-            let Some(index) =
-                (0..self.cards.row_count()).find(|&i| self.cards.row_data(i).is_some_and(|c| c.id.as_str() == id))
+        for status in &statuses {
+            let Some(index) = (0..self.cards.row_count())
+                .find(|&i| self.cards.row_data(i).is_some_and(|c| c.id.as_str() == status.id))
             else {
                 continue;
             };
@@ -745,6 +741,7 @@ impl App {
                     SourceState::Searching => ("En attente de la fenêtre", 2),
                     SourceState::Lost => ("Fenêtre perdue", 2),
                     SourceState::Failed => ("Erreur", 3),
+                    SourceState::Finishing => ("Finalisation…", 0),
                     SourceState::Finished => ("Terminée", 0),
                 };
                 card.state = state.into();
@@ -757,6 +754,8 @@ impl App {
                     error.as_str().into()
                 } else if status.backlog_seconds >= BACKLOG_WARNING_SECONDS {
                     format!("L'encodeur prend du retard ({:.0} s)", status.backlog_seconds).into()
+                } else if status.part > 1 {
+                    format!("Encodeur relancé : partie {} en cours", status.part).into()
                 } else {
                     SharedString::new()
                 };

@@ -10,6 +10,7 @@
 //! - deux fils d'écriture envoient ces flux à un processus FFmpeg dédié.
 
 mod audio_task;
+mod output;
 pub mod probe;
 pub mod remux;
 pub mod resolve;

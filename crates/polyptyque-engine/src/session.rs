@@ -1,42 +1,35 @@
-//! Session d'enregistrement : démarrage commun de toutes les sources d'une
-//! scène, suivi, arrêt propre.
+//! Session d'enregistrement : départ commun des sources d'une scène sur une
+//! même horloge, ajout ou arrêt d'une source en cours de route, arrêt propre.
 
 use std::collections::HashSet;
-use std::fs::{self, File, OpenOptions};
-use std::io::Write;
+use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result};
-use crossbeam_channel::{unbounded, Receiver};
-use polyptyque_core::config::{new_id, Settings, Source, CHANNELS, SAMPLE_RATE};
-use polyptyque_core::encoder::{bytes_per_hour, recording_args, EncoderChoice, RecordingSpec};
+use anyhow::{bail, Context, Result};
+use crossbeam_channel::unbounded;
+use polyptyque_core::config::{new_id, Settings, Source};
+use polyptyque_core::encoder::{bytes_per_hour, EncoderChoice};
 use polyptyque_core::naming::{self, NameParts};
 use polyptyque_core::platform::{Nv12Frame, Platform};
 use polyptyque_core::timeline::HNS_PER_SEC;
 
 use crate::audio_task::AudioTask;
+use crate::output::{OutputPlan, OutputTask};
 use crate::shared::{Shared, SourceState};
 use crate::video_task::VideoTask;
-use crate::writer;
 
 /// À l'arrêt, délai accordé aux fils de capture pour se terminer.
 const CAPTURE_JOIN_TIMEOUT: Duration = Duration::from_secs(10);
-/// À l'arrêt, un encodeur qui n'avance plus pendant ce délai est arrêté de
-/// force. Tant qu'il avance, on le laisse vider sa file, aussi longue
-/// soit-elle : rien de ce qui a été capturé n'est perdu.
-const STALL_TIMEOUT: Duration = Duration::from_secs(30);
-/// Délai accordé à FFmpeg pour finaliser un fichier.
-const FINALIZE_TIMEOUT: Duration = Duration::from_secs(60);
 /// Le son est « actif » s'il a été entendu dans ce délai.
 const RECENT_SOUND_HNS: u64 = 2 * HNS_PER_SEC;
 
 pub struct SessionPlan {
     pub scene_name: String,
+    /// Sources démarrées ensemble, au même instant.
     pub sources: Vec<Source>,
     pub settings: Settings,
     pub encoder: EncoderChoice,
@@ -47,6 +40,7 @@ pub struct SessionPlan {
 
 #[derive(Debug, Clone)]
 pub struct SourceStatus {
+    pub id: String,
     pub name: String,
     pub state: SourceState,
     pub frames_total: u64,
@@ -57,15 +51,22 @@ pub struct SourceStatus {
     pub audio_recent: bool,
     /// Retard de l'encodeur, en secondes d'images en attente.
     pub backlog_seconds: f32,
+    /// Partie de fichier en cours : plus de 1 après une relance de
+    /// l'encodeur.
+    pub part: u32,
+    /// Fichier en cours d'écriture.
     pub output: PathBuf,
+    /// Taille de toutes les parties.
     pub file_size: u64,
     pub error: Option<String>,
 }
 
 #[derive(Debug, Clone)]
 pub struct SourceSummary {
+    pub id: String,
     pub name: String,
-    pub output: PathBuf,
+    /// Fichiers produits, dans l'ordre (plusieurs si l'encodeur a été relancé).
+    pub outputs: Vec<PathBuf>,
     pub file_size: u64,
     pub frames_total: u64,
     pub frames_dropped: u64,
@@ -74,23 +75,88 @@ pub struct SourceSummary {
 }
 
 struct SourceRuntime {
+    /// Ordre de démarrage dans la session.
+    order: usize,
+    id: String,
     name: String,
-    output: PathBuf,
     log: PathBuf,
     shared: Arc<Shared>,
-    encoder: Option<Child>,
     capture_threads: Vec<JoinHandle<()>>,
-    /// Fil d'écriture et chemin de son tube.
-    writers: Vec<(JoinHandle<()>, String)>,
+    output_thread: Option<JoinHandle<()>>,
+    /// Fil qui finalise la source une fois son arrêt demandé.
+    finisher: Option<JoinHandle<()>>,
+}
+
+impl SourceRuntime {
+    fn recording(&self) -> bool {
+        self.finisher.is_none() && !self.shared.is_done()
+    }
+
+    /// Demande l'arrêt et confie la finalisation à un fil séparé : rien ne
+    /// bloque l'appelant.
+    fn begin_stop(&mut self, stop_at: u64) {
+        if self.finisher.is_some() {
+            return;
+        }
+        self.shared.request_stop(stop_at);
+        self.shared.mark_finishing();
+        let captures = std::mem::take(&mut self.capture_threads);
+        let output = self.output_thread.take();
+        let shared = self.shared.clone();
+        let name = self.name.clone();
+        let finish = move || {
+            let deadline = Instant::now() + CAPTURE_JOIN_TIMEOUT;
+            for handle in captures {
+                if !join_until(handle, deadline) {
+                    // Fil bloqué (pilote, périphérique audio…) : on ferme le
+                    // fichier sans lui plutôt que de rester suspendu.
+                    log::warn!("[{name}] capture bloquée à l'arrêt : fichier fermé sans elle");
+                    shared.abandon_capture();
+                }
+            }
+            if let Some(output) = output {
+                let _ = output.join();
+            }
+            shared.mark_done();
+            log::info!("[{name}] fichier(s) finalisé(s)");
+        };
+        match thread::Builder::new().name(format!("{}-finalisation", self.name)).spawn(finish) {
+            Ok(handle) => self.finisher = Some(handle),
+            Err(e) => log::error!("[{}] finalisation impossible : {e}", self.name),
+        }
+    }
+
+    fn summary(&self) -> SourceSummary {
+        let outputs = self.shared.outputs();
+        SourceSummary {
+            id: self.id.clone(),
+            name: self.name.clone(),
+            file_size: total_size(&outputs),
+            outputs,
+            frames_total: self.shared.frames_total.load(Ordering::Relaxed),
+            frames_dropped: self.shared.frames_dropped.load(Ordering::Relaxed),
+            error: self.shared.error(),
+            log: self.log.clone(),
+        }
+    }
 }
 
 pub struct Session {
     platform: Arc<dyn Platform>,
+    scene_name: String,
+    settings: Settings,
+    encoder: EncoderChoice,
+    ffmpeg: PathBuf,
+    log_dir: PathBuf,
+    /// Préfixe des tubes nommés, unique sur la machine.
+    tag: String,
+    /// Source par source, la dernière exécution (une source arrêtée puis
+    /// relancée en a plusieurs : les précédentes sont dans `retired`).
     sources: Vec<SourceRuntime>,
+    retired: Vec<SourceRuntime>,
+    started_count: usize,
+    taken: HashSet<PathBuf>,
     t0_hns: u64,
-    fps: u32,
-    output_dir: PathBuf,
-    bytes_per_hour: u64,
     started: Instant,
 }
 
@@ -100,104 +166,153 @@ impl Session {
         fs::create_dir_all(&settings.output_dir)
             .with_context(|| format!("création du dossier {}", settings.output_dir.display()))?;
         fs::create_dir_all(&plan.log_dir).with_context(|| format!("création du dossier {}", plan.log_dir.display()))?;
-
-        let (date, time) = naming::now_parts();
-        let tag = format!("polyptyque-{}-{}", std::process::id(), new_id());
-        let mut taken = HashSet::new();
         platform.begin_recording_session();
 
-        // 1. Encodeurs prêts à recevoir : tubes, FFmpeg, fils d'écriture.
-        let mut prepared = Vec::new();
-        for (index, source) in plan.sources.iter().enumerate() {
-            let stem = naming::render(
-                &settings.filename_template,
-                &NameParts { date: &date, time: &time, scene: &plan.scene_name, source: &source.name },
-            );
-            let output = naming::unique_path(&settings.output_dir, &stem, "mkv", &taken);
-            taken.insert(output.clone());
-            let log = plan.log_dir.join(format!("{:02}-{}.ffmpeg.log", index + 1, naming::sanitize(&source.name)));
-            let shared = Arc::new(Shared::new());
-            let (video_tx, video_rx) = unbounded::<Nv12Frame>();
-            let (audio_tx, audio_rx) = unbounded::<Vec<u8>>();
-            let mut runtime = SourceRuntime {
-                name: source.name.clone(),
-                output,
-                log,
-                shared: shared.clone(),
-                encoder: None,
-                capture_threads: Vec::new(),
-                writers: Vec::new(),
-            };
-            match start_encoder(
-                platform.as_ref(),
-                &plan,
-                source,
-                &format!("{tag}-{index}"),
-                &runtime,
-                video_rx,
-                audio_rx,
-            ) {
-                Ok((child, writers)) => {
-                    runtime.encoder = Some(child);
-                    runtime.writers = writers;
-                }
-                Err(e) => shared.fail(format!("démarrage de l'encodeur impossible : {e:#}")),
-            }
-            prepared.push((runtime, source.clone(), video_tx, audio_tx));
-        }
-
-        // 2. Départ commun de toutes les captures.
         let t0_hns = platform.now_hns();
+        let mut session = Session {
+            tag: format!("polyptyque-{}-{}", std::process::id(), new_id()),
+            platform,
+            scene_name: plan.scene_name,
+            settings: plan.settings,
+            encoder: plan.encoder,
+            ffmpeg: plan.ffmpeg,
+            log_dir: plan.log_dir,
+            sources: Vec::new(),
+            retired: Vec::new(),
+            started_count: 0,
+            taken: HashSet::new(),
+            t0_hns,
+            started: Instant::now(),
+        };
+        // Départ commun : toutes les sources partagent la même origine.
+        let (date, time) = naming::now_parts();
+        for source in &plan.sources {
+            session.launch(source, t0_hns, &date, &time);
+        }
+        Ok(session)
+    }
+
+    /// Démarre une source de plus pendant la session (son fichier commence
+    /// maintenant). Refusé si elle enregistre déjà.
+    pub fn add_source(&mut self, source: &Source) -> Result<()> {
+        if self.is_recording(&source.id) {
+            bail!("« {} » enregistre déjà", source.name);
+        }
+        let (date, time) = naming::now_parts();
+        let origin = self.platform.now_hns();
+        self.launch(source, origin, &date, &time);
+        Ok(())
+    }
+
+    /// Arrête une seule source ; son fichier est finalisé en arrière-plan.
+    /// Renvoie faux si elle n'enregistrait pas.
+    pub fn stop_source(&mut self, id: &str) -> bool {
+        let stop_at = self.platform.now_hns();
+        match self.sources.iter_mut().find(|s| s.id == id && s.recording()) {
+            Some(source) => {
+                source.begin_stop(stop_at);
+                true
+            }
+            None => false,
+        }
+    }
+
+    pub fn is_recording(&self, id: &str) -> bool {
+        self.sources.iter().any(|s| s.id == id && s.recording())
+    }
+
+    /// Nombre de sources en train d'enregistrer.
+    pub fn recording_count(&self) -> usize {
+        self.sources.iter().filter(|s| s.recording()).count()
+    }
+
+    fn launch(&mut self, source: &Source, origin_hns: u64, date: &str, time: &str) {
+        let settings = &self.settings;
+        let order = self.started_count;
+        self.started_count += 1;
+        let stem = naming::render(
+            &settings.filename_template,
+            &NameParts { date, time, scene: &self.scene_name, source: &source.name },
+        );
+        let output = naming::unique_path(&settings.output_dir, &stem, "mkv", &self.taken);
+        self.taken.insert(output.clone());
+        let log = self.log_dir.join(format!("{:02}-{}.ffmpeg.log", order + 1, naming::sanitize(&source.name)));
+        let shared = Arc::new(Shared::new());
+        let (video_tx, video_rx) = unbounded::<Nv12Frame>();
+        let (audio_tx, audio_rx) = unbounded::<Vec<u8>>();
         let video = &settings.video;
-        let mut sources = Vec::new();
-        for (mut runtime, source, video_tx, audio_tx) in prepared {
-            if !runtime.shared.has_failed() {
-                let video_task = VideoTask {
-                    platform: platform.clone(),
-                    source: source.clone(),
-                    shared: runtime.shared.clone(),
-                    queue: video_tx,
-                    t0_hns,
-                    width: video.width,
-                    height: video.height,
-                    fps: video.fps,
-                };
-                let audio_task = AudioTask {
-                    platform: platform.clone(),
-                    name: source.name.clone(),
-                    shared: runtime.shared.clone(),
-                    queue: audio_tx,
-                    t0_hns,
-                };
-                for (suffix, spawned) in [
-                    (
-                        "vidéo",
-                        thread::Builder::new().name(format!("{}-video", source.name)).spawn(move || video_task.run()),
-                    ),
-                    (
-                        "son",
-                        thread::Builder::new().name(format!("{}-audio", source.name)).spawn(move || audio_task.run()),
-                    ),
-                ] {
-                    match spawned {
-                        Ok(handle) => runtime.capture_threads.push(handle),
-                        Err(e) => runtime.shared.fail(format!("fil {suffix} : {e}")),
-                    }
+
+        let output_task = OutputTask {
+            platform: self.platform.clone(),
+            plan: OutputPlan {
+                ffmpeg: self.ffmpeg.clone(),
+                encoder: self.encoder,
+                width: video.width,
+                height: video.height,
+                fps: video.fps,
+                video_bitrate_kbps: video.bitrate_kbps,
+                audio_bitrate_kbps: settings.audio.bitrate_kbps,
+                title: source.name.clone(),
+                first_output: output.clone(),
+                log: log.clone(),
+                pipe_prefix: format!("{}-{order}", self.tag),
+            },
+            shared: shared.clone(),
+            video: video_rx,
+            audio: audio_rx,
+        };
+        let mut runtime = SourceRuntime {
+            order,
+            id: source.id.clone(),
+            name: source.name.clone(),
+            log,
+            shared: shared.clone(),
+            capture_threads: Vec::new(),
+            output_thread: None,
+            finisher: None,
+        };
+        match thread::Builder::new().name(format!("{}-encodage", source.name)).spawn(move || output_task.run()) {
+            Ok(handle) => runtime.output_thread = Some(handle),
+            Err(e) => shared.fail(format!("fil d'encodage : {e}")),
+        }
+        if !shared.has_failed() {
+            let video_task = VideoTask {
+                platform: self.platform.clone(),
+                source: source.clone(),
+                shared: shared.clone(),
+                queue: video_tx,
+                t0_hns: origin_hns,
+                width: video.width,
+                height: video.height,
+                fps: video.fps,
+            };
+            let audio_task = AudioTask {
+                platform: self.platform.clone(),
+                name: source.name.clone(),
+                shared: shared.clone(),
+                queue: audio_tx,
+                t0_hns: origin_hns,
+            };
+            for (suffix, spawned) in [
+                (
+                    "vidéo",
+                    thread::Builder::new().name(format!("{}-video", source.name)).spawn(move || video_task.run()),
+                ),
+                ("son", thread::Builder::new().name(format!("{}-audio", source.name)).spawn(move || audio_task.run())),
+            ] {
+                match spawned {
+                    Ok(handle) => runtime.capture_threads.push(handle),
+                    Err(e) => shared.fail(format!("fil {suffix} : {e}")),
                 }
             }
-            log::info!("[{}] enregistrement vers {}", runtime.name, runtime.output.display());
-            sources.push(runtime);
         }
-
-        Ok(Session {
-            bytes_per_hour: bytes_per_hour(video.bitrate_kbps, settings.audio.bitrate_kbps) * sources.len() as u64,
-            platform,
-            sources,
-            t0_hns,
-            fps: video.fps,
-            output_dir: settings.output_dir.clone(),
-            started: Instant::now(),
-        })
+        log::info!("[{}] enregistrement vers {}", runtime.name, output.display());
+        if let Some(index) = self.sources.iter().position(|s| s.id == runtime.id) {
+            let previous = std::mem::replace(&mut self.sources[index], runtime);
+            self.retired.push(previous);
+        } else {
+            self.sources.push(runtime);
+        }
     }
 
     pub fn elapsed(&self) -> Duration {
@@ -209,34 +324,30 @@ impl Session {
     }
 
     pub fn output_dir(&self) -> &Path {
-        &self.output_dir
+        &self.settings.output_dir
     }
 
-    /// Débit total estimé, en octets par heure.
+    /// Débit total estimé des sources qui enregistrent, en octets par heure.
     pub fn bytes_per_hour(&self) -> u64 {
-        self.bytes_per_hour
+        bytes_per_hour(self.settings.video.bitrate_kbps, self.settings.audio.bitrate_kbps)
+            * self.recording_count() as u64
     }
 
     pub fn free_space(&self) -> Option<u64> {
-        self.platform.free_disk_space(&self.output_dir)
+        self.platform.free_disk_space(&self.settings.output_dir)
     }
 
     pub fn status(&mut self) -> Vec<SourceStatus> {
         let now = self.platform.now_hns();
-        let fps = self.fps.max(1) as f32;
+        let fps = self.settings.video.fps.max(1) as f32;
         self.sources
-            .iter_mut()
+            .iter()
             .map(|source| {
                 let shared = &source.shared;
-                if let Some(child) = source.encoder.as_mut() {
-                    if let Ok(Some(status)) = child.try_wait() {
-                        if shared.stop_at().is_none() && !shared.has_failed() {
-                            shared.fail(format!("l'encodeur s'est arrêté ({status}) : {}", log_tail(&source.log)));
-                        }
-                    }
-                }
+                let outputs = shared.outputs();
                 let last_sound = shared.audio_last_sound_hns.load(Ordering::Relaxed);
                 SourceStatus {
+                    id: source.id.clone(),
                     name: source.name.clone(),
                     state: shared.state(),
                     frames_total: shared.frames_total.load(Ordering::Relaxed),
@@ -245,8 +356,9 @@ impl Session {
                     audio_level: shared.take_peak(),
                     audio_recent: last_sound != 0 && now.saturating_sub(last_sound) < RECENT_SOUND_HNS,
                     backlog_seconds: shared.video_backlog.load(Ordering::Relaxed) as f32 / fps,
-                    output: source.output.clone(),
-                    file_size: fs::metadata(&source.output).map(|m| m.len()).unwrap_or(0),
+                    part: shared.part.load(Ordering::Relaxed),
+                    output: outputs.last().cloned().unwrap_or_default(),
+                    file_size: total_size(&outputs),
                     error: shared.error(),
                 }
             })
@@ -254,101 +366,28 @@ impl Session {
     }
 
     /// Arrête toutes les sources au même instant et attend que chaque
-    /// fichier soit correctement fermé.
+    /// fichier soit correctement fermé (y compris ceux des sources arrêtées
+    /// une à une auparavant).
     pub fn stop(mut self) -> Vec<SourceSummary> {
         let stop_at = self.platform.now_hns();
-        for source in &self.sources {
-            source.shared.request_stop(stop_at);
-        }
-        let deadline = Instant::now() + CAPTURE_JOIN_TIMEOUT;
         for source in &mut self.sources {
-            for handle in source.capture_threads.drain(..) {
-                if !join_until(handle, deadline) {
-                    // Fil bloqué (pilote, périphérique audio…) : on ferme le
-                    // fichier sans lui plutôt que de rester suspendu.
-                    log::warn!("[{}] capture bloquée à l'arrêt : fichier fermé sans elle", source.name);
-                    source.shared.abandon_capture();
-                }
-            }
+            source.begin_stop(stop_at);
         }
-        for source in &mut self.sources {
-            for (handle, pipe_path) in std::mem::take(&mut source.writers) {
-                wait_writer(handle, &pipe_path, &mut source.encoder, &source.shared);
-            }
-            if let Some(child) = source.encoder.as_mut() {
-                wait_encoder(child, FINALIZE_TIMEOUT);
+        for source in self.sources.iter_mut().chain(self.retired.iter_mut()) {
+            if let Some(finisher) = source.finisher.take() {
+                let _ = finisher.join();
             }
         }
         self.platform.end_recording_session();
 
-        self.sources
-            .iter()
-            .map(|source| SourceSummary {
-                name: source.name.clone(),
-                output: source.output.clone(),
-                file_size: fs::metadata(&source.output).map(|m| m.len()).unwrap_or(0),
-                frames_total: source.shared.frames_total.load(Ordering::Relaxed),
-                frames_dropped: source.shared.frames_dropped.load(Ordering::Relaxed),
-                error: source.shared.error(),
-                log: source.log.clone(),
-            })
-            .collect()
+        let mut all: Vec<&SourceRuntime> = self.sources.iter().chain(self.retired.iter()).collect();
+        all.sort_by_key(|s| s.order);
+        all.into_iter().map(SourceRuntime::summary).collect()
     }
 }
 
-type Writers = Vec<(JoinHandle<()>, String)>;
-
-fn start_encoder(
-    platform: &dyn Platform,
-    plan: &SessionPlan,
-    source: &Source,
-    pipe_prefix: &str,
-    runtime: &SourceRuntime,
-    video_rx: Receiver<Nv12Frame>,
-    audio_rx: Receiver<Vec<u8>>,
-) -> Result<(Child, Writers)> {
-    let video_pipe = platform.create_stream_pipe(&format!("{pipe_prefix}-video"))?;
-    let audio_pipe = platform.create_stream_pipe(&format!("{pipe_prefix}-audio"))?;
-    let video_path = video_pipe.ffmpeg_path();
-    let audio_path = audio_pipe.ffmpeg_path();
-    let settings = &plan.settings;
-    let args = recording_args(&RecordingSpec {
-        video_input: &video_path,
-        audio_input: &audio_path,
-        width: settings.video.width,
-        height: settings.video.height,
-        fps: settings.video.fps,
-        sample_rate: SAMPLE_RATE,
-        channels: CHANNELS,
-        encoder: plan.encoder,
-        video_bitrate_kbps: settings.video.bitrate_kbps,
-        audio_bitrate_kbps: settings.audio.bitrate_kbps,
-        title: &source.name,
-        output: &runtime.output,
-    });
-
-    let mut log = File::create(&runtime.log).with_context(|| format!("création de {}", runtime.log.display()))?;
-    writeln!(log, "{} {}", plan.ffmpeg.display(), args.join(" "))?;
-    log.flush()?;
-    let mut command = Command::new(&plan.ffmpeg);
-    command.args(&args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::from(log));
-    platform.prepare_encoder_process(&mut command);
-    let mut child = command.spawn().with_context(|| format!("lancement de {}", plan.ffmpeg.display()))?;
-
-    let shared = &runtime.shared;
-    let writers = writer::spawn(format!("{}-video-pipe", source.name), video_pipe, video_rx, shared.clone(), "image")
-        .and_then(|video| {
-            writer::spawn(format!("{}-audio-pipe", source.name), audio_pipe, audio_rx, shared.clone(), "son")
-                .map(|audio| vec![(video, video_path), (audio, audio_path)])
-        });
-    match writers {
-        Ok(writers) => Ok((child, writers)),
-        Err(e) => {
-            let _ = child.kill();
-            let _ = child.wait();
-            Err(e.into())
-        }
-    }
+fn total_size(outputs: &[PathBuf]) -> u64 {
+    outputs.iter().filter_map(|p| fs::metadata(p).ok()).map(|m| m.len()).sum()
 }
 
 /// Attend un fil jusqu'à l'échéance. Renvoie faux s'il ne s'est pas
@@ -362,79 +401,4 @@ fn join_until(handle: JoinHandle<()>, deadline: Instant) -> bool {
     }
     let _ = handle.join();
     true
-}
-
-/// Attend la fin d'un fil d'écriture. Si FFmpeg s'est arrêté, ou n'avance
-/// plus du tout pendant [`STALL_TIMEOUT`], le fil est débloqué pour ne
-/// jamais rester suspendu.
-fn wait_writer(handle: JoinHandle<()>, pipe_path: &str, encoder: &mut Option<Child>, shared: &Shared) {
-    let mut unblocked = false;
-    let mut last_bytes = shared.bytes_sent.load(Ordering::Relaxed);
-    let mut last_progress = Instant::now();
-    while !handle.is_finished() {
-        let bytes = shared.bytes_sent.load(Ordering::Relaxed);
-        if bytes != last_bytes {
-            last_bytes = bytes;
-            last_progress = Instant::now();
-        }
-        let encoder_gone = match encoder.as_mut() {
-            Some(child) => matches!(child.try_wait(), Ok(Some(_))),
-            None => true,
-        };
-        if !unblocked && (encoder_gone || last_progress.elapsed() >= STALL_TIMEOUT) {
-            log::warn!("l'encodeur ne lit plus {pipe_path} : arrêt forcé");
-            if let Some(child) = encoder.as_mut() {
-                let _ = child.kill();
-            }
-            // Débloque un fil encore en attente de connexion.
-            let _ = OpenOptions::new().read(true).open(pipe_path);
-            unblocked = true;
-        }
-        thread::sleep(Duration::from_millis(50));
-    }
-    let _ = handle.join();
-}
-
-fn wait_encoder(child: &mut Child, timeout: Duration) {
-    let deadline = Instant::now() + timeout;
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                log::info!("encodeur terminé : {status}");
-                return;
-            }
-            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(100)),
-            _ => {
-                log::warn!("l'encodeur ne se termine pas : arrêt forcé");
-                let _ = child.kill();
-                let _ = child.wait();
-                return;
-            }
-        }
-    }
-}
-
-/// Dernières lignes utiles du journal de FFmpeg, pour expliquer un échec.
-fn log_tail(path: &Path) -> String {
-    let text = fs::read_to_string(path).unwrap_or_default();
-    let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
-    let tail = lines[lines.len().saturating_sub(3)..].join(" | ");
-    let mut tail: String = tail.chars().take(400).collect();
-    if tail.is_empty() {
-        tail = "journal vide".into();
-    }
-    tail
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn log_tail_keeps_last_lines() {
-        let path = std::env::temp_dir().join(format!("polyptyque-log-{}.txt", new_id()));
-        fs::write(&path, "commande\n\nligne 1\nligne 2\nligne 3\n").unwrap();
-        assert_eq!(log_tail(&path), "ligne 1 | ligne 2 | ligne 3");
-        fs::remove_file(path).unwrap();
-    }
 }

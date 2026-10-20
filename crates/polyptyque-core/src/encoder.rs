@@ -150,9 +150,17 @@ pub fn recording_args(spec: &RecordingSpec) -> Vec<String> {
     args.push(format!("{}k", spec.audio_bitrate_kbps));
     args.push("-metadata".into());
     args.push(format!("title={}", spec.title));
-    args.extend(strings(&["-f", "matroska"]));
+    args.extend(matroska_output());
     args.push(spec.output.to_string_lossy().into_owned());
     args
+}
+
+/// Sortie Matroska résistante aux plantages : les données sont écrites au
+/// fil de l'eau, par blocs d'une seconde au plus. Si FFmpeg s'arrête
+/// brutalement, le fichier reste lisible et perd au plus une seconde
+/// environ (contre cinq par défaut, voire tout le fichier à faible débit).
+fn matroska_output() -> Vec<String> {
+    strings(&["-cluster_time_limit", "1000", "-flush_packets", "1", "-f", "matroska"])
 }
 
 fn raw_input_tuning() -> Vec<String> {
@@ -234,6 +242,7 @@ mod tests {
         assert!(joined.contains("-g 120"));
         assert!(joined.contains("-vf setparams=range=tv:colorspace=bt709"));
         assert!(joined.contains("-preset p4"));
+        assert!(joined.contains("-cluster_time_limit 1000 -flush_packets 1 -f matroska sortie.mkv"));
         assert!(args.contains(&"title=Firefox 1".to_string()));
         assert_eq!(args.last().unwrap(), "sortie.mkv");
         // Les deux entrées précèdent la sélection des flux.

@@ -212,6 +212,128 @@ fn color_tags(path: &Path) -> String {
     String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
+struct Sim {
+    root: PathBuf,
+    platform: Arc<SimPlatform>,
+}
+
+fn sim() -> Sim {
+    let root = std::env::temp_dir().join(format!("polyptyque-sim-{}", new_id()));
+    let pipes_dir = root.join("tubes");
+    fs::create_dir_all(&pipes_dir).unwrap();
+    Sim { platform: Arc::new(SimPlatform { start: Instant::now(), pipes_dir }), root }
+}
+
+fn plan(root: &Path, sources: Vec<Source>) -> SessionPlan {
+    SessionPlan {
+        scene_name: "Simulation".into(),
+        sources,
+        settings: Settings {
+            output_dir: root.join("sorties"),
+            filename_template: "{scène}_{source}".into(),
+            video: VideoSettings {
+                width: WIDTH,
+                height: HEIGHT,
+                fps: FPS,
+                codec: Codec::H264,
+                hardware: HardwarePreference::Cpu,
+                bitrate_kbps: 500,
+            },
+            ..Default::default()
+        },
+        encoder: EncoderChoice { kind: EncoderKind::Software, codec: Codec::H264 },
+        ffmpeg: PathBuf::from("ffmpeg"),
+        log_dir: root.join("journaux"),
+    }
+}
+
+/// Image et son de chaque fichier calés l'un sur l'autre ; renvoie la
+/// durée totale de la vidéo.
+fn check_parts(name: &str, outputs: &[PathBuf]) -> f64 {
+    let mut total = 0.0;
+    for output in outputs {
+        let (video, audio) = measure(output);
+        eprintln!("{name} · {} : vidéo {video:.3} s, son {audio:.3} s", output.file_name().unwrap().to_string_lossy());
+        assert!((audio - video).abs() < 0.1, "{} : son {audio} s, vidéo {video} s", output.display());
+        total += video;
+    }
+    total
+}
+
+#[test]
+fn crashed_encoder_resumes_in_a_new_part() {
+    if !ffmpeg_available() {
+        eprintln!("FFmpeg absent : test ignoré");
+        return;
+    }
+    let Sim { root, platform } = sim();
+    let plan = plan(&root, vec![application("Plantée", "immediate"), application("Témoin", "immediate")]);
+    let mut session = Session::start(platform, plan).expect("démarrage");
+    thread::sleep(Duration::from_secs(3));
+    // Plantage brutal du FFmpeg de la première source.
+    let pattern = format!("{}/.*-0-p1-video", root.join("tubes").display());
+    let killed = Command::new("pkill").args(["-KILL", "-f", &pattern]).status().unwrap();
+    assert!(killed.success(), "FFmpeg de la première source introuvable");
+    thread::sleep(Duration::from_secs(4));
+    let statuses = session.status();
+    assert_eq!(statuses[0].part, 2, "{:?}", statuses[0]);
+    assert_eq!(statuses[0].state, SourceState::Connected, "{:?}", statuses[0]);
+    assert_eq!(statuses[1].part, 1);
+    let elapsed = session.elapsed().as_secs_f64();
+    let summaries = session.stop();
+
+    let crashed = &summaries[0];
+    assert_eq!(crashed.outputs.len(), 2, "{:?}", crashed.outputs);
+    assert!(crashed.outputs[1].ends_with("Simulation_Plantée_partie2.mkv"));
+    let total = check_parts(&crashed.name, &crashed.outputs);
+    // Seule la reprise (environ une seconde) manque.
+    assert!(total > elapsed - 2.0 && total <= elapsed + 0.25, "{total} s pour {elapsed} s");
+    let witness = &summaries[1];
+    assert_eq!(witness.outputs.len(), 1);
+    assert!((check_parts(&witness.name, &witness.outputs) - elapsed).abs() < 0.25);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn sources_start_and_stop_individually() {
+    if !ffmpeg_available() {
+        eprintln!("FFmpeg absent : test ignoré");
+        return;
+    }
+    let Sim { root, platform } = sim();
+    let first = application("Première", "immediate");
+    let second = application("Seconde", "immediate");
+    let mut session = Session::start(platform, plan(&root, vec![first.clone()])).expect("démarrage");
+    thread::sleep(Duration::from_secs(1));
+    session.add_source(&second).expect("ajout");
+    assert!(session.add_source(&second).is_err(), "une source ne peut pas enregistrer deux fois");
+    assert_eq!(session.recording_count(), 2);
+    thread::sleep(Duration::from_secs(2));
+    assert!(session.stop_source(&second.id));
+    assert!(!session.is_recording(&second.id));
+    assert_eq!(session.recording_count(), 1);
+    // La finalisation se fait en arrière-plan.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while session.status()[1].state != SourceState::Finished {
+        assert!(Instant::now() < deadline, "finalisation trop longue");
+        thread::sleep(Duration::from_millis(100));
+    }
+    thread::sleep(Duration::from_secs(1));
+    // Reprise : un nouveau fichier.
+    session.add_source(&second).expect("reprise");
+    thread::sleep(Duration::from_secs(1));
+    let elapsed = session.elapsed().as_secs_f64();
+    let summaries = session.stop();
+    let names: Vec<&str> = summaries.iter().map(|s| s.name.as_str()).collect();
+    assert_eq!(names, ["Première", "Seconde", "Seconde"]);
+    let durations: Vec<f64> = summaries.iter().map(|s| check_parts(&s.name, &s.outputs)).collect();
+    assert!((durations[0] - elapsed).abs() < 0.25, "{durations:?} pour {elapsed} s");
+    assert!((durations[1] - 2.0).abs() < 0.3, "{durations:?}");
+    assert!((durations[2] - 1.0).abs() < 0.3, "{durations:?}");
+    assert!(summaries[2].outputs[0].ends_with("Simulation_Seconde (2).mkv"), "{:?}", summaries[2].outputs);
+    fs::remove_dir_all(root).unwrap();
+}
+
 #[test]
 fn simulated_session_produces_synchronised_files() {
     if !ffmpeg_available() {
@@ -267,24 +389,26 @@ fn simulated_session_produces_synchronised_files() {
 
     for summary in &summaries {
         assert!(summary.error.is_none(), "{} : {:?}", summary.name, summary.error);
-        assert!(summary.output.exists(), "fichier manquant : {}", summary.output.display());
+        assert_eq!(summary.outputs.len(), 1, "{}", summary.name);
+        let output = &summary.outputs[0];
+        assert!(output.exists(), "fichier manquant : {}", output.display());
         assert_eq!(
-            color_tags(&summary.output),
+            color_tags(output),
             "color_range=tv|color_space=bt709|color_transfer=bt709|color_primaries=bt709",
             "{}",
             summary.name
         );
-        let (video, audio) = measure(&summary.output);
+        let (video, audio) = measure(output);
         eprintln!("{} : vidéo {video:.3} s, son {audio:.3} s, session {elapsed:.3} s", summary.name);
         // Toutes les sources ont la durée de la session, image et son calés.
         assert!((video - elapsed).abs() < 0.25, "{} : vidéo {video} s pour {elapsed} s", summary.name);
         assert!((audio - video).abs() < 0.1, "{} : son {audio} s, vidéo {video} s", summary.name);
     }
-    assert!(summaries[0].output.ends_with("Simulation_Immédiate.mkv"));
+    assert!(summaries[0].outputs[0].ends_with("Simulation_Immédiate.mkv"));
 
     // Conversion sans perte en MP4 : mêmes durées, mêmes couleurs, aucune
     // erreur de décodage, fichier d'origine conservé.
-    let mkv = &summaries[0].output;
+    let mkv = &summaries[0].outputs[0];
     let mut progress = Vec::new();
     let mp4 = remux::convert(
         &SimPlatform { start: Instant::now(), pipes_dir: root.clone() },

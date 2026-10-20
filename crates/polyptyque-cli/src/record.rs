@@ -112,10 +112,11 @@ pub fn run(platform: &Arc<dyn Platform>, config: &Config) -> Result<()> {
 
     println!();
     for summary in &summaries {
+        let files: Vec<String> = summary.outputs.iter().map(|p| p.display().to_string()).collect();
         let line = format!(
             "{} : {} ({}, {} image(s) perdue(s))",
             summary.name,
-            summary.output.display(),
+            files.join(" + "),
             ui::bytes(summary.file_size),
             ui::thousands(summary.frames_dropped)
         );
@@ -130,7 +131,7 @@ pub fn run(platform: &Arc<dyn Platform>, config: &Config) -> Result<()> {
     println!("{}", style(format!("Journaux : {}", log_dir.display())).dim());
     if settings.convert_to_mp4 {
         println!();
-        let files: Vec<_> = summaries.iter().filter(|s| s.file_size > 0).map(|s| s.output.clone()).collect();
+        let files: Vec<_> = summaries.iter().flat_map(|s| s.outputs.iter().cloned()).collect();
         if let Err(e) = convert::convert_all(platform.as_ref(), &files) {
             ui::failure(&format!("{e:#}"));
         }
@@ -285,7 +286,7 @@ fn source_line(status: &SourceStatus) -> String {
         SourceState::Connected => style(status.state.label()).green(),
         SourceState::Failed => style(status.state.label()).red().bold(),
         SourceState::Lost | SourceState::Minimized | SourceState::Searching => style(status.state.label()).yellow(),
-        SourceState::Finished => style(status.state.label()).dim(),
+        SourceState::Finishing | SourceState::Finished => style(status.state.label()).dim(),
     };
     let sound = if status.audio_recent { "actif" } else { "muet" };
     format!(

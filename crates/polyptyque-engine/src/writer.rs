@@ -1,7 +1,12 @@
 //! Fils d'écriture : vident une file vers un tube lu par FFmpeg.
+//!
+//! Un fil d'écriture sert une seule partie de fichier. Si l'encodeur
+//! s'arrête, le superviseur de la source abandonne la partie et en démarre
+//! une nouvelle, dont les fils reprennent les mêmes files là où elles en
+//! sont.
 
 use std::io;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -15,47 +20,92 @@ const POLL: Duration = Duration::from_millis(500);
 
 /// Données envoyables dans un tube : une image partagée ou un bloc de son.
 pub(crate) trait Chunk: Send + 'static {
-    fn bytes(&self) -> &[u8];
+    /// Taille dans l'unité de position du flux (une image, ou des octets
+    /// de son).
+    fn units(&self) -> u64;
+    /// Données à écrire une fois les `skip` premières unités sautées.
+    fn tail(&self, skip: u64) -> &[u8];
 }
 
+/// Bloc de son : la position se compte en octets.
 impl Chunk for Vec<u8> {
-    fn bytes(&self) -> &[u8] {
-        self
+    fn units(&self) -> u64 {
+        self.len() as u64
+    }
+
+    fn tail(&self, skip: u64) -> &[u8] {
+        &self[(skip as usize).min(self.len())..]
     }
 }
 
+/// Image : la position se compte en images.
 impl Chunk for Arc<Vec<u8>> {
-    fn bytes(&self) -> &[u8] {
-        self.as_slice()
+    fn units(&self) -> u64 {
+        1
     }
+
+    fn tail(&self, skip: u64) -> &[u8] {
+        if skip > 0 {
+            &[]
+        } else {
+            self.as_slice()
+        }
+    }
+}
+
+/// Commande partagée par les fils d'écriture d'une même partie.
+#[derive(Default)]
+pub(crate) struct PartControl {
+    /// La partie est abandonnée (encodeur arrêté) : les fils s'arrêtent.
+    pub cancel: AtomicBool,
+    /// Une écriture a échoué : l'encodeur ne lit plus ce tube.
+    pub broken: AtomicBool,
+}
+
+pub(crate) struct WriterJob<T> {
+    pub thread_name: String,
+    pub pipe: Box<dyn StreamPipe>,
+    pub queue: Receiver<T>,
+    /// Position du flux, partagée avec les parties précédentes et suivantes.
+    pub position: Arc<AtomicU64>,
+    /// Les données antérieures à cette position sont sautées (recalage
+    /// après une relance de l'encodeur).
+    pub start_at: u64,
+    pub label: &'static str,
 }
 
 pub(crate) fn spawn<T: Chunk>(
-    thread_name: String,
-    pipe: Box<dyn StreamPipe>,
-    queue: Receiver<T>,
+    job: WriterJob<T>,
     shared: Arc<Shared>,
-    label: &'static str,
+    control: Arc<PartControl>,
 ) -> io::Result<JoinHandle<()>> {
+    let WriterJob { thread_name, pipe, queue, position, start_at, label } = job;
     thread::Builder::new().name(thread_name).spawn(move || {
         let mut output = match pipe.connect() {
             Ok(output) => output,
             Err(e) => {
-                shared.fail(format!("{label} : {e:#}"));
+                log::warn!("{label} : connexion à l'encodeur impossible : {e:#}");
+                control.broken.store(true, Ordering::SeqCst);
                 return;
             }
         };
-        loop {
+        while !control.cancel.load(Ordering::SeqCst) {
             match queue.recv_timeout(POLL) {
                 Ok(item) => {
-                    let bytes = item.bytes();
-                    if let Err(e) = output.write_all(bytes) {
-                        if shared.stop_at().is_none() {
-                            shared.fail(format!("{label} : l'encodeur ne reçoit plus les données ({e})"));
+                    let units = item.units();
+                    let at = position.fetch_add(units, Ordering::SeqCst);
+                    let data = item.tail(start_at.saturating_sub(at).min(units));
+                    if data.is_empty() {
+                        continue;
+                    }
+                    if let Err(e) = output.write_all(data) {
+                        if !control.cancel.load(Ordering::SeqCst) {
+                            log::warn!("{label} : l'encodeur ne reçoit plus les données ({e})");
                         }
+                        control.broken.store(true, Ordering::SeqCst);
                         return;
                     }
-                    shared.bytes_sent.fetch_add(bytes.len() as u64, Ordering::Relaxed);
+                    shared.bytes_sent.fetch_add(data.len() as u64, Ordering::Relaxed);
                 }
                 // File vide : on continue, sauf si la capture a été abandonnée
                 // à l'arrêt (fil bloqué), auquel cas on ferme le flux.
@@ -67,4 +117,26 @@ pub(crate) fn spawn<T: Chunk>(
         let _ = output.flush();
         // La fermeture du tube signale la fin du flux à FFmpeg.
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sound_is_cut_at_the_resume_position() {
+        let block: Vec<u8> = (0..16).collect();
+        assert_eq!(block.units(), 16);
+        assert_eq!(block.tail(0).len(), 16);
+        assert_eq!(block.tail(8), &block[8..]);
+        assert!(block.tail(40).is_empty());
+    }
+
+    #[test]
+    fn frames_are_skipped_whole() {
+        let frame = Arc::new(vec![1u8; 12]);
+        assert_eq!(frame.units(), 1);
+        assert_eq!(frame.tail(0).len(), 12);
+        assert!(frame.tail(1).is_empty());
+    }
 }
