@@ -149,10 +149,13 @@ export component SceneNameSheet inherits Sheet {
     close => {
         Bridge.close-sheet();
     }
+    init => {
+        name-edit.focus();
+    }
 
     Field {
         label: "Nom de la scène";
-        LineEdit {
+        name-edit := LineEdit {
             text <=> Bridge.scene-name-input;
             accepted => {
                 Bridge.confirm-scene-name();
@@ -302,7 +305,10 @@ export component SettingsSheet inherits Sheet {
             }
             Toggle {
                 text: "Aperçus en direct des sources";
-                checked <=> Bridge.settings-previews;
+                checked: Bridge.settings-previews;
+                toggled(value) => {
+                    Bridge.settings-previews = value;
+                }
             }
             Field {
                 label: "Raccourci : démarrer ou arrêter l'enregistrement";

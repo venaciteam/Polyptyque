@@ -1,5 +1,6 @@
 // Composants visuels réutilisables.
 
+import { ScrollView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import { SourceCard } from "bridge.slint";
 
@@ -359,10 +360,13 @@ export component SourceCardView inherits Rectangle {
 }
 
 // Interrupteur aux couleurs du thème.
+// L'état est fourni de l'extérieur : un clic demande le nouvel état par
+// `toggled(valeur)` sans modifier `checked`, qui reste ainsi toujours lié à
+// l'état réel.
 export component Toggle inherits Rectangle {
     in property <string> text;
-    in-out property <bool> checked;
-    callback toggled();
+    in property <bool> checked;
+    callback toggled(bool);
 
     height: 24px;
     min-width: row.min-width;
@@ -405,8 +409,7 @@ export component Toggle inherits Rectangle {
     TouchArea {
         mouse-cursor: pointer;
         clicked => {
-            root.checked = !root.checked;
-            root.toggled();
+            root.toggled(!root.checked);
         }
     }
 }
@@ -487,7 +490,7 @@ export component Sheet inherits Rectangle {
             content := VerticalLayout {
                 padding: 22px;
                 spacing: 16px;
-                HorizontalLayout {
+                header := HorizontalLayout {
                     Text {
                         text: root.title;
                         color: Theme.text;
@@ -504,7 +507,19 @@ export component Sheet inherits Rectangle {
                         }
                     }
                 }
-                @children
+                // Le contenu défile si la fenêtre est trop petite.
+                scroll := ScrollView {
+                    vertical-stretch: 1;
+                    min-height: min(body.preferred-height, 120px);
+                    preferred-height: body.preferred-height;
+                    content-width: self.visible-width;
+                    content-height: body.preferred-height;
+                    body := VerticalLayout {
+                        width: scroll.visible-width;
+                        spacing: 16px;
+                        @children
+                    }
+                }
             }
         }
     }

@@ -7,6 +7,7 @@
 
 use std::cell::{Cell, RefCell};
 use std::fs;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::PathBuf;
 use std::process::Command;
 use std::rc::Rc;
@@ -83,6 +84,9 @@ pub struct App {
     toast_timer: Timer,
     free_space: Cell<Option<u64>>,
     last_disk_check: Cell<Option<Instant>>,
+    disk_check_running: Cell<bool>,
+    /// Identifiants des sources de la session, dans l'ordre du moteur.
+    session_ids: RefCell<Vec<String>>,
     quitting: Cell<bool>,
     #[cfg(windows)]
     hotkeys: RefCell<Option<polyptyque_windows::hotkeys::HotkeyListener>>,
@@ -132,6 +136,8 @@ pub fn run(platform: Arc<dyn Platform>, paths: Paths, initial: Option<Config>) -
         toast_timer: Timer::default(),
         free_space: Cell::new(None),
         last_disk_check: Cell::new(None),
+        disk_check_running: Cell::new(false),
+        session_ids: RefCell::new(Vec::new()),
         quitting: Cell::new(false),
         #[cfg(windows)]
         hotkeys: RefCell::new(None),
@@ -257,6 +263,12 @@ impl App {
         self.session.borrow().is_some()
     }
 
+    /// Enregistrement en cours ou opération longue : rien ne doit changer
+    /// dans les scènes et les sources.
+    fn locked(&self) -> bool {
+        self.recording() || self.busy.get()
+    }
+
     fn save(&self) {
         let mut config = self.config.borrow_mut();
         config.normalize();
@@ -316,6 +328,23 @@ impl App {
         let source_count = scene.sources.len();
         drop(config);
 
+        // Les aperçus ne signalent que les changements : on garde l'image et
+        // l'état déjà connus de chaque source.
+        let previous: Vec<SourceCard> = self.cards.iter().collect();
+        let cards: Vec<SourceCard> = cards
+            .into_iter()
+            .map(|mut card| {
+                if let Some(old) = previous.iter().find(|c| c.id == card.id).filter(|_| previews) {
+                    card.preview = old.preview.clone();
+                    card.has_preview = old.has_preview;
+                    card.state = old.state.clone();
+                    card.tone = old.tone;
+                    card.placeholder = old.placeholder.clone();
+                    card.can_open = old.can_open;
+                }
+                card
+            })
+            .collect();
         self.cards.set_vec(cards);
         self.with_bridge(|b| {
             b.set_scenes(ModelRc::new(VecModel::from(scenes)));
@@ -348,18 +377,29 @@ impl App {
     }
 
     /// Met à jour l'espace disque affiché (au plus toutes les 10 s, sauf si
-    /// `force`).
+    /// `force`). La mesure se fait hors du fil de l'interface : un disque
+    /// réseau lent ne doit pas la figer.
     fn refresh_disk(&self, force: bool) {
         let due = self.last_disk_check.get().is_none_or(|t| t.elapsed() >= Duration::from_secs(10));
-        if !force && !due {
+        if (!force && !due) || self.disk_check_running.get() {
             return;
         }
         self.last_disk_check.set(Some(Instant::now()));
+        self.disk_check_running.set(true);
         let config = self.config.borrow();
         let sources = config.active_scene().sources.len().max(1) as u64;
         let per_hour = bytes_per_hour(config.settings.video.bitrate_kbps, config.settings.audio.bitrate_kbps) * sources;
-        let free = self.platform.free_disk_space(&config.settings.output_dir);
+        let dir = config.settings.output_dir.clone();
         drop(config);
+        let platform = self.platform.clone();
+        thread::spawn(move || {
+            let free = platform.free_disk_space(&dir);
+            post(move |app| app.apply_disk(free, per_hour));
+        });
+    }
+
+    fn apply_disk(&self, free: Option<u64>, per_hour: u64) {
+        self.disk_check_running.set(false);
         self.free_space.set(free);
         let (text, warning) = match free {
             Some(free) => {
@@ -375,6 +415,9 @@ impl App {
             b.set_disk_text(text.into());
             b.set_disk_warning(warning);
         });
+        if self.recording() && free.is_some_and(|free| free < DISK_STOP_THRESHOLD) {
+            self.stop_recording(Some("Disque presque plein : arrêt automatique.".into()));
+        }
     }
 
     fn toast(&self, message: &str, tone: i32) {
@@ -488,16 +531,22 @@ impl App {
             self.toast("Ajoute d'abord au moins une source à cette scène.", 2);
             return;
         }
+        self.close_sheet();
         self.set_busy("Recherche du meilleur encodeur…");
         let platform = self.platform.clone();
         thread::spawn(move || {
-            let result = prepare(platform.as_ref(), &config, &scene);
+            let result = catch_unwind(AssertUnwindSafe(|| prepare(platform.as_ref(), &config, &scene)))
+                .unwrap_or_else(|_| Err(anyhow!("erreur interne pendant la préparation (voir le journal)")));
             post(move |app| app.finish_start(result, config, scene));
         });
     }
 
     fn finish_start(&self, result: Result<Prepared>, config: Config, scene: Scene) {
         self.set_busy("");
+        if self.quitting.get() {
+            let _ = slint::quit_event_loop();
+            return;
+        }
         let prepared = match result {
             Ok(prepared) => prepared,
             Err(e) => {
@@ -517,6 +566,7 @@ impl App {
         match Session::start(self.platform.clone(), plan) {
             Ok(session) => {
                 *self.session.borrow_mut() = Some(session);
+                *self.session_ids.borrow_mut() = scene.sources.iter().map(|s| s.id.clone()).collect();
                 let video = &config.settings.video;
                 let text = format!(
                     "{} · {}x{} · {} i/s · {} kb/s",
@@ -557,7 +607,10 @@ impl App {
         };
         self.set_busy("Arrêt : finalisation des fichiers…");
         thread::spawn(move || {
-            let summaries = session.stop();
+            let (summaries, reason) = match catch_unwind(AssertUnwindSafe(move || session.stop())) {
+                Ok(summaries) => (summaries, reason),
+                Err(_) => (Vec::new(), Some("Erreur interne pendant l'arrêt (voir le journal).".to_string())),
+            };
             post(move |app| app.finish_stop(summaries, reason));
         });
     }
@@ -570,6 +623,10 @@ impl App {
         if self.quitting.get() {
             let _ = slint::quit_event_loop();
             return;
+        }
+        // Une demande « arrêter et quitter » restée ouverte n'a plus d'objet.
+        if matches!(*self.confirm.borrow(), Some(Confirm::QuitWhileRecording)) {
+            self.close_sheet();
         }
         let errors: Vec<String> =
             summaries.iter().filter_map(|s| s.error.as_ref().map(|e| format!("{} : {e}", s.name))).collect();
@@ -598,7 +655,13 @@ impl App {
             self.with_bridge(|b| b.set_elapsed(elapsed.into()));
             session.status()
         };
-        for (index, status) in statuses.iter().enumerate() {
+        let ids = self.session_ids.borrow().clone();
+        for (status, id) in statuses.iter().zip(&ids) {
+            let Some(index) =
+                (0..self.cards.row_count()).find(|&i| self.cards.row_data(i).is_some_and(|c| c.id.as_str() == id))
+            else {
+                continue;
+            };
             self.update_card(index, |card| {
                 let (state, tone) = match status.state {
                     SourceState::Connected => ("Enregistre", 1),
@@ -624,15 +687,12 @@ impl App {
             });
         }
         self.refresh_disk(false);
-        if self.free_space.get().is_some_and(|free| free < DISK_STOP_THRESHOLD) {
-            self.stop_recording(Some("Disque presque plein : arrêt automatique.".into()));
-        }
     }
 
     // ----- Scènes ----------------------------------------------------------
 
     fn select_scene(&self, id: &str) {
-        if self.recording() || self.busy.get() {
+        if self.locked() {
             return;
         }
         self.config.borrow_mut().active_scene = id.to_string();
@@ -651,12 +711,16 @@ impl App {
     }
 
     fn confirm_scene_name(&self) {
+        if self.locked() {
+            return;
+        }
         let Some(ui) = self.ui.upgrade() else {
             return;
         };
         let bridge = ui.global::<Bridge>();
         let name = bridge.get_scene_name_input().trim().to_string();
         if name.is_empty() {
+            self.toast("Indique un nom de scène.", 2);
             return;
         }
         let new = bridge.get_sheet() == "scene-new";
@@ -712,6 +776,9 @@ impl App {
     }
 
     fn confirm_add_browser(&self) {
+        if self.locked() {
+            return;
+        }
         let Some(ui) = self.ui.upgrade() else {
             return;
         };
@@ -737,6 +804,10 @@ impl App {
                 }
             }
         };
+        if bridge.get_new_name().trim().is_empty() {
+            self.toast("Indique un nom pour cette source.", 2);
+            return;
+        }
         let url = bridge.get_new_url().to_string();
         let source = Source::browser(
             &bridge.get_new_name(),
@@ -804,6 +875,9 @@ impl App {
     }
 
     fn confirm_add_application(&self) {
+        if self.locked() {
+            return;
+        }
         let Some(ui) = self.ui.upgrade() else {
             return;
         };
@@ -812,6 +886,10 @@ impl App {
         let Some(window) = self.windows.borrow().get(index.max(0) as usize).cloned().filter(|_| index >= 0) else {
             return;
         };
+        if bridge.get_new_name().trim().is_empty() {
+            self.toast("Indique un nom pour cette source.", 2);
+            return;
+        }
         let source =
             Source::application(&bridge.get_new_name(), &window, bridge.get_relaunch(), bridge.get_capture_cursor());
         let name = source.name.clone();
@@ -842,6 +920,9 @@ impl App {
     }
 
     fn move_source(&self, delta: i32) {
+        if self.locked() {
+            return;
+        }
         let Some(ui) = self.ui.upgrade() else {
             return;
         };
@@ -900,10 +981,27 @@ impl App {
                 fps.len() - 1
             }
         };
-        let hotkey_choices: Vec<SharedString> =
-            std::iter::once("Aucun".to_string()).chain(hotkeys::choices()).map(Into::into).collect();
+        // Liste commune aux trois raccourcis, valeurs personnalisées comprises.
+        let mut hotkey_list: Vec<String> = std::iter::once("Aucun".to_string()).chain(hotkeys::choices()).collect();
+        for custom in [&s.hotkeys.toggle_recording, &s.hotkeys.show_window, &s.hotkeys.toggle_previews] {
+            if !custom.is_empty() && !hotkey_list.iter().any(|c| c.eq_ignore_ascii_case(custom)) {
+                hotkey_list.push(custom.clone());
+            }
+        }
         let hotkey_index = |value: &str| {
-            hotkeys::choices().iter().position(|c| c.eq_ignore_ascii_case(value)).map_or(0, |i| i as i32 + 1)
+            if value.is_empty() {
+                return 0;
+            }
+            hotkey_list.iter().position(|c| c.eq_ignore_ascii_case(value)).map_or(0, |i| i as i32)
+        };
+        let mut audio_choices: Vec<SharedString> =
+            AUDIO_BITRATES.iter().map(|a| SharedString::from(format!("{a} kb/s"))).collect();
+        let audio_index = match AUDIO_BITRATES.iter().position(|&a| a == s.audio.bitrate_kbps) {
+            Some(i) => i,
+            None => {
+                audio_choices.push(format!("{} kb/s (personnalisé)", s.audio.bitrate_kbps).into());
+                audio_choices.len() - 1
+            }
         };
         let values = (
             resolutions,
@@ -916,7 +1014,7 @@ impl App {
                 Codec::Hevc => 1,
             },
             HARDWARE.iter().position(|&h| h == s.video.hardware).unwrap_or(0) as i32,
-            AUDIO_BITRATES.iter().position(|&a| a == s.audio.bitrate_kbps).unwrap_or(2) as i32,
+            audio_index as i32,
             s.output_dir.display().to_string(),
             s.filename_template.clone(),
             s.previews,
@@ -924,6 +1022,7 @@ impl App {
             hotkey_index(&s.hotkeys.show_window),
             hotkey_index(&s.hotkeys.toggle_previews),
         );
+        let hotkey_choices: Vec<SharedString> = hotkey_list.into_iter().map(Into::into).collect();
         drop(config);
         self.with_bridge(|b| {
             b.set_resolution_choices(ModelRc::new(VecModel::from(values.0)));
@@ -940,9 +1039,7 @@ impl App {
                 HARDWARE.iter().map(|h| SharedString::from(h.label())).collect::<Vec<_>>(),
             )));
             b.set_hardware_index(values.6);
-            b.set_audio_choices(ModelRc::new(VecModel::from(
-                AUDIO_BITRATES.iter().map(|a| SharedString::from(format!("{a} kb/s"))).collect::<Vec<_>>(),
-            )));
+            b.set_audio_choices(ModelRc::new(VecModel::from(audio_choices)));
             b.set_audio_index(values.7);
             b.set_output_dir(values.8.into());
             b.set_template(values.9.into());
@@ -959,8 +1056,13 @@ impl App {
     fn browse_output(&self) {
         #[cfg(windows)]
         {
-            let current = self.ui.upgrade().map(|ui| ui.global::<Bridge>().get_output_dir().to_string());
-            let mut dialog = rfd::FileDialog::new().set_title("Dossier des enregistrements");
+            let Some(ui) = self.ui.upgrade() else {
+                return;
+            };
+            let current = Some(ui.global::<Bridge>().get_output_dir().to_string());
+            let mut dialog = rfd::FileDialog::new()
+                .set_title("Dossier des enregistrements")
+                .set_parent(&ui.window().window_handle());
             if let Some(dir) = current.filter(|d| std::path::Path::new(d).exists()) {
                 dialog = dialog.set_directory(dir);
             }
@@ -987,13 +1089,24 @@ impl App {
             b.set_settings_error("Indique un dossier pour les enregistrements.".into());
             return;
         }
+        let choices: Vec<String> = b.get_hotkey_choices().iter().map(|c| c.to_string()).collect();
         let hotkey = |index: i32| {
             if index <= 0 {
                 String::new()
             } else {
-                hotkeys::choices().get(index as usize - 1).cloned().unwrap_or_default()
+                choices.get(index as usize).cloned().unwrap_or_default()
             }
         };
+        let chosen = [
+            hotkey(b.get_hotkey_record_index()),
+            hotkey(b.get_hotkey_show_index()),
+            hotkey(b.get_hotkey_previews_index()),
+        ];
+        let assigned: Vec<&String> = chosen.iter().filter(|h| !h.is_empty()).collect();
+        if (1..assigned.len()).any(|i| assigned[..i].contains(&assigned[i])) {
+            b.set_settings_error("Un même raccourci ne peut servir qu'à une seule action.".into());
+            return;
+        }
         let previews_before;
         let previews_after;
         {
@@ -1010,15 +1123,18 @@ impl App {
             s.video.codec = if b.get_codec_index() == 1 { Codec::Hevc } else { Codec::H264 };
             s.video.hardware =
                 HARDWARE.get(b.get_hardware_index().max(0) as usize).copied().unwrap_or(HardwarePreference::Auto);
-            s.audio.bitrate_kbps = AUDIO_BITRATES.get(b.get_audio_index().max(0) as usize).copied().unwrap_or(192);
+            if let Some(&audio) = AUDIO_BITRATES.get(b.get_audio_index().max(0) as usize) {
+                s.audio.bitrate_kbps = audio;
+            }
             s.output_dir = PathBuf::from(output_dir);
             s.filename_template = b.get_template().trim().to_string();
             previews_before = s.previews;
             s.previews = b.get_settings_previews();
             previews_after = s.previews;
-            s.hotkeys.toggle_recording = hotkey(b.get_hotkey_record_index());
-            s.hotkeys.show_window = hotkey(b.get_hotkey_show_index());
-            s.hotkeys.toggle_previews = hotkey(b.get_hotkey_previews_index());
+            let [record, show, previews] = chosen;
+            s.hotkeys.toggle_recording = record;
+            s.hotkeys.show_window = show;
+            s.hotkeys.toggle_previews = previews;
         }
         b.set_sheet("".into());
         self.save();
@@ -1066,6 +1182,7 @@ impl App {
         let action = self.confirm.borrow_mut().take();
         self.with_bridge(|b| b.set_sheet("".into()));
         match action {
+            Some(Confirm::DeleteScene) | Some(Confirm::RemoveSource(_)) if self.locked() => {}
             Some(Confirm::DeleteScene) => {
                 {
                     let mut config = self.config.borrow_mut();
@@ -1087,8 +1204,15 @@ impl App {
                 self.restart_previews();
             }
             Some(Confirm::QuitWhileRecording) => {
-                self.quitting.set(true);
-                self.stop_recording(None);
+                if self.recording() {
+                    self.quitting.set(true);
+                    self.stop_recording(None);
+                } else if self.busy.get() {
+                    // Préparation ou arrêt en cours : on quittera à la fin.
+                    self.quitting.set(true);
+                } else {
+                    let _ = slint::quit_event_loop();
+                }
             }
             None => {}
         }
@@ -1096,6 +1220,7 @@ impl App {
 
     fn close_requested(&self) -> CloseRequestResponse {
         if self.busy.get() {
+            self.toast("Opération en cours : Polyptyque pourra être fermé dans un instant.", 2);
             return CloseRequestResponse::KeepWindowShown;
         }
         if self.recording() {

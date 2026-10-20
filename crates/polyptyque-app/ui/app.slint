@@ -78,21 +78,27 @@ component TopBar inherits HorizontalLayout {
         color: Theme.text-muted;
         vertical-alignment: center;
         overflow: elide;
+        min-width: 60px;
     }
     Rectangle {
         horizontal-stretch: 1;
     }
+    // Les informations s'abrègent d'elles-mêmes si la fenêtre est étroite.
     Text {
         text: Bridge.encoder-text;
         color: Theme.text-faint;
         font-size: Theme.font-small;
         vertical-alignment: center;
+        overflow: elide;
+        min-width: 0;
     }
     Text {
         text: Bridge.disk-text;
         color: Bridge.disk-warning ? Theme.warning : Theme.text-muted;
         font-size: Theme.font-small;
         vertical-alignment: center;
+        overflow: elide;
+        min-width: 0;
     }
     StatusPill { }
 }
@@ -351,7 +357,7 @@ component ControlsPanel inherits Panel {
     Toggle {
         text: "Aperçus en direct";
         checked: Bridge.previews-enabled;
-        toggled => {
+        toggled(value) => {
             Bridge.toggle-previews();
         }
     }
@@ -396,11 +402,6 @@ export component AppWindow inherits Window {
         }
     }
 
-    if Bridge.toast-text != "": Toast {
-        x: (root.width - self.width) / 2;
-        y: root.height - self.height - 262px;
-    }
-
     if Bridge.sheet == "browser": AddBrowserSheet {
         width: root.width;
         height: root.height;
@@ -420,6 +421,11 @@ export component AppWindow inherits Window {
     if Bridge.sheet == "confirm": ConfirmSheet {
         width: root.width;
         height: root.height;
+    }
+    // Les messages restent visibles au-dessus des fenêtres modales.
+    if Bridge.toast-text != "": Toast {
+        x: (root.width - self.width) / 2;
+        y: Bridge.sheet == "" ? root.height - self.height - 262px : root.height - self.height - 24px;
     }
     if Bridge.busy-text != "": BusyOverlay {
         width: root.width;
