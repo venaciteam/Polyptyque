@@ -25,10 +25,13 @@ use polyptyque_core::hotkeys;
 use polyptyque_core::naming;
 use polyptyque_core::paths;
 use polyptyque_core::platform::{BrowserInstall, Platform, WindowInfo};
+#[cfg(not(windows))]
+use polyptyque_engine::remux;
 use polyptyque_engine::resolve::{self, PrepareEvent};
 use polyptyque_engine::{probe, Session, SessionPlan, SourceState, SourceStatus, SourceSummary};
 use slint::{CloseRequestResponse, ComponentHandle, Image, Model, ModelRc, SharedString, Timer, TimerMode, VecModel};
 
+use crate::convert::{ConversionEvent, Converter};
 use crate::format;
 use crate::preview::{self, PreviewManager, PreviewState};
 use crate::{AppWindow, Bridge, SceneItem, SourceCard, SourceItem, WindowItem};
@@ -50,6 +53,19 @@ enum Confirm {
     DeleteScene,
     RemoveSource(String),
     QuitWhileRecording,
+    QuitWhileConverting,
+    CancelConversion,
+}
+
+/// Suivi de la file de conversion MP4, pour l'affichage.
+#[derive(Default)]
+struct ConversionProgress {
+    /// Fichiers demandés depuis que la file était vide.
+    total: usize,
+    finished: usize,
+    succeeded: usize,
+    failures: Vec<String>,
+    cancelled: bool,
 }
 
 /// Résultat de la préparation d'un enregistrement.
@@ -92,6 +108,8 @@ pub struct App {
     /// Identifiants des sources de la session, dans l'ordre du moteur.
     session_ids: RefCell<Vec<String>>,
     quitting: Cell<bool>,
+    converter: RefCell<Option<Converter>>,
+    conversion: RefCell<ConversionProgress>,
     #[cfg(windows)]
     hotkeys: RefCell<Option<polyptyque_windows::hotkeys::HotkeyListener>>,
 }
@@ -145,10 +163,14 @@ pub fn run(platform: Arc<dyn Platform>, paths: Paths, initial: Option<Config>) -
         disk_check_running: Cell::new(false),
         session_ids: RefCell::new(Vec::new()),
         quitting: Cell::new(false),
+        converter: RefCell::new(None),
+        conversion: RefCell::new(ConversionProgress::default()),
         #[cfg(windows)]
         hotkeys: RefCell::new(None),
     });
     APP.with(|a| *a.borrow_mut() = Some(app.clone()));
+    *app.converter.borrow_mut() =
+        Some(Converter::start(app.platform.clone(), |event| post(move |app| app.on_conversion(event))));
 
     install_callbacks(&ui);
     let bridge = ui.global::<Bridge>();
@@ -181,6 +203,9 @@ pub fn run(platform: Arc<dyn Platform>, paths: Paths, initial: Option<Config>) -
     if let Some(session) = app.session.borrow_mut().take() {
         session.stop();
     }
+    // Une conversion interrompue efface son fichier partiel ; le MKV reste.
+    let converter = app.converter.borrow_mut().take();
+    drop(converter);
     APP.with(|a| a.borrow_mut().take());
     Ok(())
 }
@@ -247,6 +272,12 @@ fn install_callbacks(ui: &AppWindow) {
     b.on_toggle_previews(|| {
         with_app(|a| a.toggle_previews());
     });
+    b.on_convert_files(|| {
+        with_app(|a| a.convert_files());
+    });
+    b.on_request_cancel_conversion(|| {
+        with_app(|a| a.request_cancel_conversion());
+    });
     b.on_close_sheet(|| {
         with_app(|a| a.close_sheet());
     });
@@ -263,6 +294,10 @@ impl App {
         if let Some(ui) = self.ui.upgrade() {
             f(&ui.global::<Bridge>());
         }
+    }
+
+    fn with_bridge_value<R: Default>(&self, f: impl FnOnce(&Bridge) -> R) -> R {
+        self.ui.upgrade().map(|ui| f(&ui.global::<Bridge>())).unwrap_or_default()
     }
 
     fn recording(&self) -> bool {
@@ -670,6 +705,13 @@ impl App {
         if let Some(reason) = reason {
             message = format!("{reason} {message}");
         }
+        if self.config.borrow().settings.convert_to_mp4 {
+            let files: Vec<PathBuf> = summaries.iter().filter(|s| s.file_size > 0).map(|s| s.output.clone()).collect();
+            if !files.is_empty() {
+                message.push_str(" Conversion MP4 lancée.");
+                self.enqueue_conversions(files);
+            }
+        }
         if errors.is_empty() {
             self.toast(&message, 1);
         } else {
@@ -721,6 +763,149 @@ impl App {
             });
         }
         self.refresh_disk(false);
+    }
+
+    // ----- Conversion MP4 --------------------------------------------------
+
+    fn convert_files(&self) {
+        let dir = self.config.borrow().settings.output_dir.clone();
+        let files = self.pick_mkv_files(&dir);
+        if !files.is_empty() {
+            let count = files.len();
+            self.enqueue_conversions(files);
+            self.toast(&format!("{count} fichier(s) ajouté(s) à la conversion MP4."), 1);
+        }
+    }
+
+    #[cfg(windows)]
+    fn pick_mkv_files(&self, dir: &std::path::Path) -> Vec<PathBuf> {
+        let Some(ui) = self.ui.upgrade() else {
+            return Vec::new();
+        };
+        let mut dialog = rfd::FileDialog::new()
+            .set_title("Fichiers à convertir en MP4")
+            .add_filter("Enregistrements Polyptyque (MKV, MKA)", &["mkv", "mka"])
+            .set_parent(&ui.window().window_handle());
+        if dir.exists() {
+            dialog = dialog.set_directory(dir);
+        }
+        dialog.pick_files().unwrap_or_default()
+    }
+
+    /// Hors Windows (mode démonstration) : tous les MKV du dossier qui
+    /// n'ont pas encore leur MP4.
+    #[cfg(not(windows))]
+    fn pick_mkv_files(&self, dir: &std::path::Path) -> Vec<PathBuf> {
+        let files: Vec<PathBuf> = fs::read_dir(dir)
+            .map(|entries| {
+                entries
+                    .filter_map(|e| e.ok().map(|e| e.path()))
+                    .filter(|p| remux::is_convertible(p) && !p.with_extension("mp4").exists())
+                    .collect()
+            })
+            .unwrap_or_default();
+        if files.is_empty() {
+            self.toast("Aucun fichier MKV à convertir dans le dossier des enregistrements.", 2);
+        }
+        files
+    }
+
+    fn enqueue_conversions(&self, files: Vec<PathBuf>) {
+        let converter = self.converter.borrow();
+        let Some(converter) = converter.as_ref() else {
+            self.toast("La conversion MP4 n'est pas disponible (voir le journal).", 3);
+            return;
+        };
+        let mut progress = self.conversion.borrow_mut();
+        for file in files {
+            progress.total += 1;
+            converter.enqueue(file);
+        }
+        let text = conversion_text(&progress, 0.0);
+        drop(progress);
+        self.with_bridge(|b| {
+            b.set_converting(true);
+            b.set_conversion_text(text.into());
+        });
+    }
+
+    fn on_conversion(&self, event: ConversionEvent) {
+        match event {
+            ConversionEvent::Started { input } => {
+                log::info!("conversion de {}", input.display());
+                let text = conversion_text(&self.conversion.borrow(), 0.0);
+                self.with_bridge(|b| {
+                    b.set_converting(true);
+                    b.set_conversion_text(text.into());
+                    b.set_conversion_progress(0.0);
+                });
+            }
+            ConversionEvent::Progress(value) => {
+                let text = conversion_text(&self.conversion.borrow(), value);
+                self.with_bridge(|b| {
+                    b.set_conversion_text(text.into());
+                    b.set_conversion_progress(value);
+                });
+            }
+            ConversionEvent::Finished { input, result } => {
+                let mut progress = self.conversion.borrow_mut();
+                progress.finished += 1;
+                match result {
+                    Ok(_) => progress.succeeded += 1,
+                    Err(_) if progress.cancelled => {}
+                    Err(e) => {
+                        let name = input.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                        progress.failures.push(format!("{name} : {e}"));
+                    }
+                }
+            }
+            ConversionEvent::Idle => {
+                let progress = std::mem::take(&mut *self.conversion.borrow_mut());
+                self.with_bridge(|b| {
+                    b.set_converting(false);
+                    b.set_conversion_progress(0.0);
+                });
+                if matches!(*self.confirm.borrow(), Some(Confirm::CancelConversion | Confirm::QuitWhileConverting)) {
+                    self.close_sheet();
+                }
+                if progress.cancelled {
+                    self.toast(
+                        &format!("Conversion MP4 annulée ({} fichier(s) convertis avant l'arrêt).", progress.succeeded),
+                        2,
+                    );
+                } else if progress.failures.is_empty() {
+                    self.toast(
+                        &format!("Conversion MP4 terminée : {} fichier(s) prêts pour le montage.", progress.succeeded),
+                        1,
+                    );
+                } else {
+                    self.toast(
+                        &format!(
+                            "Conversion MP4 : {} réussie(s), {} échec(s). {}",
+                            progress.succeeded,
+                            progress.failures.len(),
+                            progress.failures.join(" · ")
+                        ),
+                        3,
+                    );
+                }
+            }
+        }
+    }
+
+    fn request_cancel_conversion(&self) {
+        let remaining = {
+            let progress = self.conversion.borrow();
+            progress.total.saturating_sub(progress.finished)
+        };
+        self.ask(
+            Confirm::CancelConversion,
+            "Annuler la conversion",
+            &format!(
+                "Arrêter la conversion MP4 ({remaining} fichier(s) restant(s)) ? Le fichier en cours de conversion est effacé ; les MKV d'origine ne sont pas touchés."
+            ),
+            "Arrêter la conversion",
+        );
     }
 
     // ----- Scènes ----------------------------------------------------------
@@ -1052,6 +1237,7 @@ impl App {
             s.output_dir.display().to_string(),
             s.filename_template.clone(),
             s.previews,
+            s.convert_to_mp4,
             hotkey_index(&s.hotkeys.toggle_recording),
             hotkey_index(&s.hotkeys.show_window),
             hotkey_index(&s.hotkeys.toggle_previews),
@@ -1078,10 +1264,11 @@ impl App {
             b.set_output_dir(values.8.into());
             b.set_template(values.9.into());
             b.set_settings_previews(values.10);
+            b.set_settings_convert(values.11);
             b.set_hotkey_choices(ModelRc::new(VecModel::from(hotkey_choices)));
-            b.set_hotkey_record_index(values.11);
-            b.set_hotkey_show_index(values.12);
-            b.set_hotkey_previews_index(values.13);
+            b.set_hotkey_record_index(values.12);
+            b.set_hotkey_show_index(values.13);
+            b.set_hotkey_previews_index(values.14);
             b.set_settings_error("".into());
             b.set_sheet("settings".into());
         });
@@ -1165,6 +1352,7 @@ impl App {
             previews_before = s.previews;
             s.previews = b.get_settings_previews();
             previews_after = s.previews;
+            s.convert_to_mp4 = b.get_settings_convert();
             let [record, show, previews] = chosen;
             s.hotkeys.toggle_recording = record;
             s.hotkeys.show_window = show;
@@ -1237,6 +1425,20 @@ impl App {
                 self.refresh_all();
                 self.restart_previews();
             }
+            Some(Confirm::CancelConversion) => {
+                if let Some(converter) = self.converter.borrow().as_ref() {
+                    self.conversion.borrow_mut().cancelled = true;
+                    converter.cancel_all();
+                }
+            }
+            Some(Confirm::QuitWhileConverting) => {
+                if self.recording() || self.busy.get() {
+                    // Un enregistrement a démarré entre-temps : il passe avant.
+                    self.close_requested();
+                } else {
+                    let _ = slint::quit_event_loop();
+                }
+            }
             Some(Confirm::QuitWhileRecording) => {
                 if self.recording() {
                     self.quitting.set(true);
@@ -1263,6 +1465,15 @@ impl App {
                 "Enregistrement en cours",
                 "Arrêter l'enregistrement et quitter Polyptyque ? Les fichiers seront finalisés proprement.",
                 "Arrêter et quitter",
+            );
+            return CloseRequestResponse::KeepWindowShown;
+        }
+        if self.with_bridge_value(|b| b.get_converting()) {
+            self.ask(
+                Confirm::QuitWhileConverting,
+                "Conversion en cours",
+                "Quitter maintenant interrompt la conversion MP4. Les fichiers MKV d'origine sont conservés : tu pourras les convertir plus tard.",
+                "Quitter quand même",
             );
             return CloseRequestResponse::KeepWindowShown;
         }
@@ -1344,4 +1555,15 @@ fn prepare(platform: &dyn Platform, config: &Config, scene: &Scene) -> Result<Pr
         }
     });
     Ok(Prepared { ffmpeg, encoder, missing })
+}
+
+/// Texte de la pastille de conversion : « MP4 · 2 sur 3 · 45 % ».
+fn conversion_text(progress: &ConversionProgress, value: f32) -> String {
+    let current = (progress.finished + 1).min(progress.total.max(1));
+    let percent = (value * 100.0).round() as u32;
+    if progress.total > 1 {
+        format!("MP4 · {current} sur {} · {percent} %", progress.total)
+    } else {
+        format!("MP4 · {percent} %")
+    }
 }

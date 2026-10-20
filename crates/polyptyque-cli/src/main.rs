@@ -8,6 +8,8 @@
 #[cfg(windows)]
 mod app;
 #[cfg(windows)]
+mod convert;
+#[cfg(windows)]
 mod keys;
 #[cfg(windows)]
 mod record;

@@ -237,6 +237,9 @@ pub struct Settings {
     pub filename_template: String,
     /// Aperçus en direct des sources dans l'interface.
     pub previews: bool,
+    /// Conversion automatique en MP4 à la fin de chaque enregistrement
+    /// (le MKV d'origine est conservé).
+    pub convert_to_mp4: bool,
     pub video: VideoSettings,
     pub audio: AudioSettings,
     pub hotkeys: HotkeySettings,
@@ -248,6 +251,7 @@ impl Default for Settings {
             output_dir: paths::default_output_dir(),
             filename_template: DEFAULT_TEMPLATE.to_string(),
             previews: true,
+            convert_to_mp4: false,
             video: VideoSettings::default(),
             audio: AudioSettings::default(),
             hotkeys: HotkeySettings::default(),

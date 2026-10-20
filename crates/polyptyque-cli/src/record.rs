@@ -17,7 +17,7 @@ use polyptyque_engine::resolve::{self, PrepareEvent};
 use polyptyque_engine::{probe, Session, SessionPlan, SourceState, SourceStatus};
 
 use crate::app::{RECORDING, STOP_REQUESTED};
-use crate::{keys, ui};
+use crate::{convert, keys, ui};
 
 /// Attente maximale des fenêtres lancées par Polyptyque.
 const LAUNCH_WAIT: Duration = Duration::from_secs(30);
@@ -128,6 +128,13 @@ pub fn run(platform: &Arc<dyn Platform>, config: &Config) -> Result<()> {
         }
     }
     println!("{}", style(format!("Journaux : {}", log_dir.display())).dim());
+    if settings.convert_to_mp4 {
+        println!();
+        let files: Vec<_> = summaries.iter().filter(|s| s.file_size > 0).map(|s| s.output.clone()).collect();
+        if let Err(e) = convert::convert_all(platform.as_ref(), &files) {
+            ui::failure(&format!("{e:#}"));
+        }
+    }
     ui::pause();
     Ok(())
 }

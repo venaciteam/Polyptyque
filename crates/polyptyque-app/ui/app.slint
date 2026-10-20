@@ -60,6 +60,51 @@ component StatusPill inherits Rectangle {
     }
 }
 
+// Conversion MP4 en cours : avancement en fond, clic pour annuler.
+component ConversionPill inherits Rectangle {
+    height: 30px;
+    width: row.preferred-width;
+    border-radius: 15px;
+    background: touch.has-hover ? Theme.surface-hover : Theme.surface-raised;
+    border-width: 1px;
+    border-color: Theme.accent.with-alpha(0.5);
+    clip: true;
+    accessible-role: button;
+    accessible-label: "\{Bridge.conversion-text}. Cliquer pour annuler la conversion.";
+
+    Rectangle {
+        x: 0;
+        width: parent.width * Bridge.conversion-progress;
+        background: Theme.accent.with-alpha(0.25);
+        animate width { duration: 240ms; }
+    }
+    row := HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 14px;
+        spacing: 8px;
+        Image {
+            source: @image-url("icons/convert.svg");
+            width: 14px;
+            height: 14px;
+            y: (parent.height - self.height) / 2;
+            colorize: Theme.accent;
+        }
+        Text {
+            text: Bridge.conversion-text;
+            color: Theme.text;
+            font-size: Theme.font-small;
+            font-weight: 600;
+            vertical-alignment: center;
+        }
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            Bridge.request-cancel-conversion();
+        }
+    }
+}
+
 component TopBar inherits HorizontalLayout {
     spacing: 14px;
     height: 36px;
@@ -99,6 +144,9 @@ component TopBar inherits HorizontalLayout {
         vertical-alignment: center;
         overflow: elide;
         min-width: 0;
+    }
+    if Bridge.converting: ConversionPill {
+        y: (parent.height - self.height) / 2;
     }
     StatusPill { }
 }
@@ -361,6 +409,14 @@ component ControlsPanel inherits Panel {
             }
         }
     }
+    ActionButton {
+        text: "Convertir en MP4…";
+        icon: @image-url("icons/convert.svg");
+        has-icon: true;
+        clicked => {
+            Bridge.convert-files();
+        }
+    }
     Toggle {
         text: "Aperçus en direct";
         checked: Bridge.previews-enabled;
@@ -370,11 +426,6 @@ component ControlsPanel inherits Panel {
     }
     Rectangle {
         vertical-stretch: 1;
-    }
-    Text {
-        text: "Polyptyque \{Bridge.version}";
-        color: Theme.text-faint;
-        font-size: Theme.font-small;
     }
 }
 

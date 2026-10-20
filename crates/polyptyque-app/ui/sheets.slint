@@ -311,6 +311,17 @@ export component SettingsSheet inherits Sheet {
                 }
             }
             Field {
+                label: "Conversion pour le montage";
+                hint: "Copie MP4 sans perte de qualité, créée à côté du MKV, qui est conservé. Prévois le double d'espace disque.";
+                Toggle {
+                    text: "Convertir en MP4 à la fin de l'enregistrement";
+                    checked: Bridge.settings-convert;
+                    toggled(value) => {
+                        Bridge.settings-convert = value;
+                    }
+                }
+            }
+            Field {
                 label: "Raccourci : démarrer ou arrêter l'enregistrement";
                 ComboBox {
                     model: Bridge.hotkey-choices;
@@ -338,6 +349,13 @@ export component SettingsSheet inherits Sheet {
         text: Bridge.settings-error;
     }
     Footer {
+        Text {
+            text: "Polyptyque \{Bridge.version}";
+            color: Theme.text-faint;
+            font-size: Theme.font-small;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
         ActionButton {
             text: "Annuler";
             kind: "ghost";

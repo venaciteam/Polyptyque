@@ -26,6 +26,7 @@ pub fn menu(config: &mut Config) -> Result<()> {
             format!("Débit audio : {} kb/s", s.audio.bitrate_kbps),
             format!("Dossier des enregistrements : {}", s.output_dir.display()),
             format!("Modèle de nom de fichier : {}", s.filename_template),
+            format!("Conversion MP4 à la fin de l'enregistrement : {}", if s.convert_to_mp4 { "oui" } else { "non" }),
             "Retour".to_string(),
         ];
         let choice = Select::with_theme(&theme)
@@ -124,6 +125,7 @@ pub fn menu(config: &mut Config) -> Result<()> {
                     .interact_text()?;
                 settings.filename_template = text.trim().to_string();
             }
+            8 => settings.convert_to_mp4 = !settings.convert_to_mp4,
             _ => return Ok(()),
         }
         config.normalize();

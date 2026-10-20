@@ -11,6 +11,7 @@
 
 mod audio_task;
 pub mod probe;
+pub mod remux;
 pub mod resolve;
 mod session;
 mod shared;

@@ -15,7 +15,7 @@ use polyptyque_core::platform::Platform;
 use polyptyque_windows::WindowsPlatform;
 use simplelog::{ConfigBuilder, LevelFilter, WriteLogger};
 
-use crate::{record, scenes, settings, sources, ui};
+use crate::{convert, record, scenes, settings, sources, ui};
 
 /// Un enregistrement est en cours : Ctrl+C l'arrête proprement au lieu de
 /// fermer le programme.
@@ -57,6 +57,7 @@ pub fn run() -> Result<()> {
             "Scènes",
             "Réglages",
             "Ouvrir le dossier des enregistrements",
+            "Convertir des enregistrements en MP4 (pour le montage)",
             "Quitter",
         ];
         let choice =
@@ -70,6 +71,7 @@ pub fn run() -> Result<()> {
             5 => scenes::menu(&mut config),
             6 => settings::menu(&mut config),
             7 => open_output_dir(&config),
+            8 => convert::menu(&platform, &config),
             _ => break,
         };
         if let Err(e) = result {

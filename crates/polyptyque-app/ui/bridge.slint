@@ -53,6 +53,11 @@ export global Bridge {
     in property <bool> previews-enabled: true;
     in property <string> version;
 
+    // Conversion MP4 en cours.
+    in property <bool> converting;
+    in property <string> conversion-text;
+    in property <float> conversion-progress;
+
     // Scènes et sources de la scène active.
     in property <[SceneItem]> scenes;
     in property <string> scene-name;
@@ -104,6 +109,7 @@ export global Bridge {
     in-out property <string> output-dir;
     in-out property <string> template;
     in-out property <bool> settings-previews;
+    in-out property <bool> settings-convert;
     in property <[string]> hotkey-choices;
     in-out property <int> hotkey-record-index;
     in-out property <int> hotkey-show-index;
@@ -132,6 +138,8 @@ export global Bridge {
     callback save-settings();
     callback open-output-folder();
     callback toggle-previews();
+    callback convert-files();
+    callback request-cancel-conversion();
     callback close-sheet();
     callback confirm-accepted();
     callback dismiss-toast();

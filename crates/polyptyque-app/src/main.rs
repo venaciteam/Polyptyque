@@ -4,6 +4,7 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 mod controller;
+mod convert;
 #[cfg(not(windows))]
 mod demo;
 mod format;

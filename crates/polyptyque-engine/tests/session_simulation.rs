@@ -11,6 +11,7 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -19,7 +20,7 @@ use anyhow::Result;
 use polyptyque_core::config::{new_id, Codec, HardwarePreference, Settings, Source, SourceKind, VideoSettings};
 use polyptyque_core::encoder::{EncoderChoice, EncoderKind};
 use polyptyque_core::platform::*;
-use polyptyque_engine::{Session, SessionPlan, SourceState};
+use polyptyque_engine::{remux, Session, SessionPlan, SourceState};
 
 const WIDTH: u32 = 320;
 const HEIGHT: u32 = 180;
@@ -280,5 +281,50 @@ fn simulated_session_produces_synchronised_files() {
         assert!((audio - video).abs() < 0.1, "{} : son {audio} s, vidéo {video} s", summary.name);
     }
     assert!(summaries[0].output.ends_with("Simulation_Immédiate.mkv"));
+
+    // Conversion sans perte en MP4 : mêmes durées, mêmes couleurs, aucune
+    // erreur de décodage, fichier d'origine conservé.
+    let mkv = &summaries[0].output;
+    let mut progress = Vec::new();
+    let mp4 = remux::convert(
+        &SimPlatform { start: Instant::now(), pipes_dir: root.clone() },
+        Path::new("ffmpeg"),
+        mkv,
+        &mut |p| progress.push(p),
+        &AtomicBool::new(false),
+    )
+    .expect("conversion");
+    assert!(mp4.ends_with("Simulation_Immédiate.mp4"));
+    assert!(mkv.exists());
+    assert_eq!(progress.last(), Some(&1.0));
+    let (mkv_video, mkv_audio) = measure(mkv);
+    let (mp4_video, mp4_audio) = measure(&mp4);
+    eprintln!("MP4 : vidéo {mp4_video:.3} s, son {mp4_audio:.3} s");
+    assert!((mp4_video - mkv_video).abs() < 0.001, "vidéo {mp4_video} s au lieu de {mkv_video} s");
+    assert!((mp4_audio - mkv_audio).abs() < 0.03, "son {mp4_audio} s au lieu de {mkv_audio} s");
+    assert!(color_tags(&mp4).contains("color_space=bt709"), "{}", color_tags(&mp4));
+    let decode =
+        Command::new("ffmpeg").args(["-v", "error", "-i"]).arg(&mp4).args(["-f", "null", "-"]).output().unwrap();
+    assert!(decode.stderr.is_empty(), "{}", String::from_utf8_lossy(&decode.stderr));
+    // Une deuxième conversion n'écrase pas la première.
+    let again = remux::convert(
+        &SimPlatform { start: Instant::now(), pipes_dir: root.clone() },
+        Path::new("ffmpeg"),
+        mkv,
+        &mut |_| {},
+        &AtomicBool::new(false),
+    )
+    .expect("deuxième conversion");
+    assert!(again.ends_with("Simulation_Immédiate (2).mp4"));
+    // Une conversion annulée ne laisse rien derrière elle.
+    let cancelled = remux::convert(
+        &SimPlatform { start: Instant::now(), pipes_dir: root.clone() },
+        Path::new("ffmpeg"),
+        mkv,
+        &mut |_| {},
+        &AtomicBool::new(true),
+    );
+    assert!(cancelled.is_err());
+    assert!(!mkv.with_file_name("Simulation_Immédiate (3).mp4").exists());
     fs::remove_dir_all(root).unwrap();
 }
