@@ -87,6 +87,9 @@ pub fn probe_args(choice: EncoderChoice) -> Vec<String> {
     ])
 }
 
+/// Propriétés colorimétriques de l'image produite par la capture.
+const COLOR_PARAMS: &str = "setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709";
+
 pub struct RecordingSpec<'a> {
     pub video_input: &'a str,
     pub audio_input: &'a str,
@@ -125,11 +128,14 @@ pub fn recording_args(spec: &RecordingSpec) -> Vec<String> {
     args.push(spec.audio_input.into());
 
     args.extend(strings(&["-map", "0:v:0", "-map", "1:a:0"]));
+    // L'image arrive déjà en BT.709 « TV » : on le déclare pour que FFmpeg
+    // n'insère pas de conversion (couleurs faussées et coût processeur).
+    args.extend(strings(&["-vf", COLOR_PARAMS]));
     args.extend(video_encoder_args(spec.encoder, spec.video_bitrate_kbps));
     // Une image clé toutes les deux secondes : bon compromis pour le montage.
     args.push("-g".into());
     args.push((spec.fps * 2).to_string());
-    // L'image est convertie en BT.709 « TV » (16-235) par la carte graphique.
+    // Étiquettes du fichier, cohérentes avec la conversion faite par la carte graphique.
     args.extend(strings(&[
         "-color_range",
         "tv",
@@ -160,7 +166,9 @@ fn video_encoder_args(choice: EncoderChoice, kbps: u32) -> Vec<String> {
     let buffer = format!("{}k", kbps.saturating_mul(2));
     let mut args = vec!["-c:v".to_string(), choice.ffmpeg_codec().to_string()];
     let tuning: &[&str] = match choice.kind {
-        EncoderKind::Nvenc => &["-preset", "p5", "-tune", "hq", "-rc", "cbr"],
+        // p4 : bonne qualité en laissant de la marge pour plusieurs sources
+        // sur l'unique encodeur matériel de la carte.
+        EncoderKind::Nvenc => &["-preset", "p4", "-tune", "hq", "-rc", "cbr"],
         EncoderKind::Amf => &["-usage", "transcoding", "-quality", "balanced", "-rc", "cbr"],
         EncoderKind::Qsv => &["-preset", "medium"],
         EncoderKind::Software => match choice.codec {
@@ -224,6 +232,8 @@ mod tests {
         assert!(joined.contains("-c:v h264_nvenc"));
         assert!(joined.contains("-b:v 12000k -maxrate 12000k -bufsize 24000k"));
         assert!(joined.contains("-g 120"));
+        assert!(joined.contains("-vf setparams=range=tv:colorspace=bt709"));
+        assert!(joined.contains("-preset p4"));
         assert!(args.contains(&"title=Firefox 1".to_string()));
         assert_eq!(args.last().unwrap(), "sortie.mkv");
         // Les deux entrées précèdent la sélection des flux.

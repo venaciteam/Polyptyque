@@ -24,8 +24,12 @@ use crate::shared::{Shared, SourceState};
 use crate::video_task::VideoTask;
 use crate::writer;
 
-/// Délai accordé aux encodeurs pour vider leurs files à l'arrêt.
-const DRAIN_TIMEOUT: Duration = Duration::from_secs(120);
+/// À l'arrêt, délai accordé aux fils de capture pour se terminer.
+const CAPTURE_JOIN_TIMEOUT: Duration = Duration::from_secs(10);
+/// À l'arrêt, un encodeur qui n'avance plus pendant ce délai est arrêté de
+/// force. Tant qu'il avance, on le laisse vider sa file, aussi longue
+/// soit-elle : rien de ce qui a été capturé n'est perdu.
+const STALL_TIMEOUT: Duration = Duration::from_secs(30);
 /// Délai accordé à FFmpeg pour finaliser un fichier.
 const FINALIZE_TIMEOUT: Duration = Duration::from_secs(60);
 /// Le son est « actif » s'il a été entendu dans ce délai.
@@ -51,6 +55,8 @@ pub struct SourceStatus {
     /// Niveau crête depuis le dernier appel (0 à 1).
     pub audio_level: f32,
     pub audio_recent: bool,
+    /// Retard de l'encodeur, en secondes d'images en attente.
+    pub backlog_seconds: f32,
     pub output: PathBuf,
     pub file_size: u64,
     pub error: Option<String>,
@@ -82,6 +88,7 @@ pub struct Session {
     platform: Arc<dyn Platform>,
     sources: Vec<SourceRuntime>,
     t0_hns: u64,
+    fps: u32,
     output_dir: PathBuf,
     bytes_per_hour: u64,
     started: Instant,
@@ -187,6 +194,7 @@ impl Session {
             platform,
             sources,
             t0_hns,
+            fps: video.fps,
             output_dir: settings.output_dir.clone(),
             started: Instant::now(),
         })
@@ -215,6 +223,7 @@ impl Session {
 
     pub fn status(&mut self) -> Vec<SourceStatus> {
         let now = self.platform.now_hns();
+        let fps = self.fps.max(1) as f32;
         self.sources
             .iter_mut()
             .map(|source| {
@@ -235,6 +244,7 @@ impl Session {
                     frames_dropped: shared.frames_dropped.load(Ordering::Relaxed),
                     audio_level: shared.take_peak(),
                     audio_recent: last_sound != 0 && now.saturating_sub(last_sound) < RECENT_SOUND_HNS,
+                    backlog_seconds: shared.video_backlog.load(Ordering::Relaxed) as f32 / fps,
                     output: source.output.clone(),
                     file_size: fs::metadata(&source.output).map(|m| m.len()).unwrap_or(0),
                     error: shared.error(),
@@ -250,15 +260,20 @@ impl Session {
         for source in &self.sources {
             source.shared.request_stop(stop_at);
         }
+        let deadline = Instant::now() + CAPTURE_JOIN_TIMEOUT;
         for source in &mut self.sources {
             for handle in source.capture_threads.drain(..) {
-                let _ = handle.join();
+                if !join_until(handle, deadline) {
+                    // Fil bloqué (pilote, périphérique audio…) : on ferme le
+                    // fichier sans lui plutôt que de rester suspendu.
+                    log::warn!("[{}] capture bloquée à l'arrêt : fichier fermé sans elle", source.name);
+                    source.shared.abandon_capture();
+                }
             }
         }
-        let deadline = Instant::now() + DRAIN_TIMEOUT;
         for source in &mut self.sources {
             for (handle, pipe_path) in std::mem::take(&mut source.writers) {
-                wait_writer(handle, &pipe_path, &mut source.encoder, deadline);
+                wait_writer(handle, &pipe_path, &mut source.encoder, &source.shared);
             }
             if let Some(child) = source.encoder.as_mut() {
                 wait_encoder(child, FINALIZE_TIMEOUT);
@@ -336,16 +351,37 @@ fn start_encoder(
     }
 }
 
-/// Attend la fin d'un fil d'écriture. Si FFmpeg s'est arrêté ou ne lit plus
-/// avant l'échéance, le fil est débloqué pour ne jamais rester suspendu.
-fn wait_writer(handle: JoinHandle<()>, pipe_path: &str, encoder: &mut Option<Child>, deadline: Instant) {
-    let mut unblocked = false;
+/// Attend un fil jusqu'à l'échéance. Renvoie faux s'il ne s'est pas
+/// terminé (il est alors abandonné).
+fn join_until(handle: JoinHandle<()>, deadline: Instant) -> bool {
     while !handle.is_finished() {
+        if Instant::now() >= deadline {
+            return false;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    let _ = handle.join();
+    true
+}
+
+/// Attend la fin d'un fil d'écriture. Si FFmpeg s'est arrêté, ou n'avance
+/// plus du tout pendant [`STALL_TIMEOUT`], le fil est débloqué pour ne
+/// jamais rester suspendu.
+fn wait_writer(handle: JoinHandle<()>, pipe_path: &str, encoder: &mut Option<Child>, shared: &Shared) {
+    let mut unblocked = false;
+    let mut last_bytes = shared.bytes_sent.load(Ordering::Relaxed);
+    let mut last_progress = Instant::now();
+    while !handle.is_finished() {
+        let bytes = shared.bytes_sent.load(Ordering::Relaxed);
+        if bytes != last_bytes {
+            last_bytes = bytes;
+            last_progress = Instant::now();
+        }
         let encoder_gone = match encoder.as_mut() {
             Some(child) => matches!(child.try_wait(), Ok(Some(_))),
             None => true,
         };
-        if !unblocked && (encoder_gone || Instant::now() >= deadline) {
+        if !unblocked && (encoder_gone || last_progress.elapsed() >= STALL_TIMEOUT) {
             log::warn!("l'encodeur ne lit plus {pipe_path} : arrêt forcé");
             if let Some(child) = encoder.as_mut() {
                 let _ = child.kill();

@@ -42,6 +42,10 @@ impl AudioTask {
         let mut out: Vec<u8> = Vec::new();
 
         loop {
+            // Encodeur arrêté : inutile d'accumuler du son qui ne sera jamais lu.
+            if shared.has_failed() {
+                break;
+            }
             let now = platform.now_hns();
             if let Some(stop) = shared.stop_at() {
                 if now >= stop {

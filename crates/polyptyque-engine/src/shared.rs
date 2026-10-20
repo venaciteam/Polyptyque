@@ -59,6 +59,11 @@ pub(crate) struct Shared {
     pub frames_total: AtomicU64,
     pub frames_new: AtomicU64,
     pub frames_dropped: AtomicU64,
+    /// Images en attente d'encodage : un retard qui grandit signale un
+    /// encodeur qui ne suit pas.
+    pub video_backlog: AtomicU64,
+    /// Octets transmis à l'encodeur (sert à vérifier qu'il avance encore).
+    pub bytes_sent: AtomicU64,
     pub audio_last_sound_hns: AtomicU64,
     audio_peak_bits: AtomicU32,
     target: Mutex<Option<WindowInfo>>,
@@ -66,6 +71,8 @@ pub(crate) struct Shared {
     failed: AtomicBool,
     error: Mutex<Option<String>>,
     stop_at_hns: AtomicU64,
+    /// Fils de capture bloqués à l'arrêt : l'écriture se termine sans eux.
+    abandoned: AtomicBool,
 }
 
 impl Shared {
@@ -75,6 +82,8 @@ impl Shared {
             frames_total: AtomicU64::new(0),
             frames_new: AtomicU64::new(0),
             frames_dropped: AtomicU64::new(0),
+            video_backlog: AtomicU64::new(0),
+            bytes_sent: AtomicU64::new(0),
             audio_last_sound_hns: AtomicU64::new(0),
             audio_peak_bits: AtomicU32::new(0),
             target: Mutex::new(None),
@@ -82,6 +91,7 @@ impl Shared {
             failed: AtomicBool::new(false),
             error: Mutex::new(None),
             stop_at_hns: AtomicU64::new(0),
+            abandoned: AtomicBool::new(false),
         }
     }
 
@@ -148,6 +158,14 @@ impl Shared {
             0 => None,
             at => Some(at),
         }
+    }
+
+    pub fn abandon_capture(&self) {
+        self.abandoned.store(true, Ordering::SeqCst);
+    }
+
+    pub fn capture_abandoned(&self) -> bool {
+        self.abandoned.load(Ordering::SeqCst)
     }
 
     /// Les nombres flottants positifs se comparent comme leurs bits.

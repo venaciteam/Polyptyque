@@ -199,6 +199,18 @@ fn measure(path: &Path) -> (f64, f64) {
     (video_frames / FPS as f64, audio_samples / 48_000.0)
 }
 
+/// Étiquettes colorimétriques du flux vidéo.
+fn color_tags(path: &Path) -> String {
+    let output = Command::new("ffprobe")
+        .args(["-v", "error", "-select_streams", "v:0", "-show_entries"])
+        .arg("stream=color_range,color_space,color_transfer,color_primaries")
+        .args(["-of", "compact=nk=0:p=0"])
+        .arg(path)
+        .output()
+        .expect("ffprobe");
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
+
 #[test]
 fn simulated_session_produces_synchronised_files() {
     if !ffmpeg_available() {
@@ -255,6 +267,12 @@ fn simulated_session_produces_synchronised_files() {
     for summary in &summaries {
         assert!(summary.error.is_none(), "{} : {:?}", summary.name, summary.error);
         assert!(summary.output.exists(), "fichier manquant : {}", summary.output.display());
+        assert_eq!(
+            color_tags(&summary.output),
+            "color_range=tv|color_space=bt709|color_transfer=bt709|color_primaries=bt709",
+            "{}",
+            summary.name
+        );
         let (video, audio) = measure(&summary.output);
         eprintln!("{} : vidéo {video:.3} s, son {audio:.3} s, session {elapsed:.3} s", summary.name);
         // Toutes les sources ont la durée de la session, image et son calés.

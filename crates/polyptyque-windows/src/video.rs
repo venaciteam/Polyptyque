@@ -6,14 +6,17 @@
 //! images ne sont traitées que lorsque le contenu change.
 
 use std::mem::ManuallyDrop;
-use std::sync::Arc;
+use std::sync::{Arc, Once};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
 use polyptyque_core::platform::{Nv12Frame, VideoCapture, WindowHandle};
 use polyptyque_core::video::fit_rect;
 use windows::core::Interface;
 use windows::Graphics::Capture::{
-    Direct3D11CaptureFrame, Direct3D11CaptureFramePool, GraphicsCaptureItem, GraphicsCaptureSession,
+    Direct3D11CaptureFrame, Direct3D11CaptureFramePool, GraphicsCaptureAccess, GraphicsCaptureAccessKind,
+    GraphicsCaptureItem, GraphicsCaptureSession,
 };
 use windows::Graphics::DirectX::Direct3D11::IDirect3DDevice;
 use windows::Graphics::DirectX::DirectXPixelFormat;
@@ -21,8 +24,8 @@ use windows::Graphics::SizeInt32;
 use windows::Win32::Foundation::{HMODULE, RECT, TRUE};
 use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_HARDWARE;
 use windows::Win32::Graphics::Direct3D11::{
-    D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D, ID3D11VideoContext, ID3D11VideoDevice,
-    ID3D11VideoProcessor, ID3D11VideoProcessorEnumerator, ID3D11VideoProcessorInputView,
+    D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Multithread, ID3D11Texture2D, ID3D11VideoContext,
+    ID3D11VideoDevice, ID3D11VideoProcessor, ID3D11VideoProcessorEnumerator, ID3D11VideoProcessorInputView,
     ID3D11VideoProcessorOutputView, D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE, D3D11_CPU_ACCESS_READ,
     D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_CREATE_DEVICE_VIDEO_SUPPORT, D3D11_MAPPED_SUBRESOURCE, D3D11_MAP_READ,
     D3D11_SDK_VERSION, D3D11_TEX2D_VPIV, D3D11_TEX2D_VPOV, D3D11_TEXTURE2D_DESC, D3D11_USAGE, D3D11_USAGE_DEFAULT,
@@ -89,6 +92,11 @@ impl WgcCapture {
             bail!("la capture de fenêtre (Windows.Graphics.Capture) n'est pas disponible sur ce système");
         }
         let (device, context) = create_device()?;
+        // La capture Windows écrit dans les surfaces depuis ses propres fils
+        // pendant que ce fil convertit les images : on protège le contexte.
+        unsafe {
+            let _ = context.cast::<ID3D11Multithread>()?.SetMultithreadProtected(true);
+        }
         let dxgi: IDXGIDevice = device.cast()?;
         let winrt_device: IDirect3DDevice = unsafe { CreateDirect3D11DeviceFromDXGIDevice(&dxgi)? }.cast()?;
 
@@ -101,7 +109,10 @@ impl WgcCapture {
             Direct3D11CaptureFramePool::CreateFreeThreaded(&winrt_device, PIXEL_FORMAT, POOL_BUFFERS, pool_size)?;
         let session = pool.CreateCaptureSession(&item)?;
         let _ = session.SetIsCursorCaptureEnabled(capture_cursor);
+        // Menus déroulants et infobulles (Windows 11 24H2 et plus récents).
+        let _ = session.SetIncludeSecondaryWindows(true);
         // Retire la bordure jaune quand Windows le permet (Windows 11).
+        request_borderless_access();
         if let Err(e) = session.SetIsBorderRequired(false) {
             log::debug!("bordure de capture non désactivable : {e}");
         }
@@ -322,6 +333,30 @@ impl Drop for WgcCapture {
         let _ = self.session.Close();
         let _ = self.pool.Close();
     }
+}
+
+/// Demande, une seule fois, l'autorisation de capturer sans bordure jaune.
+/// Sans réponse rapide, on continue : la bordure restera simplement visible.
+fn request_borderless_access() {
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        let operation = match GraphicsCaptureAccess::RequestAccessAsync(GraphicsCaptureAccessKind::Borderless) {
+            Ok(operation) => operation,
+            Err(e) => {
+                log::debug!("capture sans bordure indisponible : {e}");
+                return;
+            }
+        };
+        let deadline = Instant::now() + Duration::from_secs(2);
+        // État 0 : opération encore en cours.
+        while operation.Status().map(|s| s.0 == 0).unwrap_or(false) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(20));
+        }
+        match operation.GetResults() {
+            Ok(status) => log::info!("capture sans bordure : autorisation {}", status.0),
+            Err(e) => log::debug!("capture sans bordure : pas de réponse ({e})"),
+        }
+    });
 }
 
 fn create_device() -> Result<(ID3D11Device, ID3D11DeviceContext)> {

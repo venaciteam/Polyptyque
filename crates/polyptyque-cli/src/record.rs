@@ -23,6 +23,8 @@ const LAUNCH_WAIT: Duration = Duration::from_secs(30);
 /// En dessous, l'enregistrement s'arrête proprement pour protéger les fichiers.
 const DISK_STOP_THRESHOLD: u64 = 1_000_000_000;
 const DISK_WARNING_THRESHOLD: u64 = 10_000_000_000;
+/// Au-delà, l'encodeur ne suit plus le rythme de la capture.
+const BACKLOG_WARNING_SECONDS: f32 = 2.0;
 
 pub fn run(platform: &Arc<dyn Platform>, config: &Config) -> Result<()> {
     let theme = ui::theme();
@@ -273,6 +275,16 @@ fn render(
     ];
     for status in statuses {
         lines.push(source_line(status));
+        if status.backlog_seconds >= BACKLOG_WARNING_SECONDS {
+            lines.push(format!(
+                "    {}",
+                style(format!(
+                    "L'encodeur prend du retard ({:.0} s d'images en attente) : baisse la résolution, les i/s ou le nombre de sources.",
+                    status.backlog_seconds
+                ))
+                .yellow()
+            ));
+        }
         if let Some(error) = &status.error {
             lines.push(format!("    {}", style(ui::truncate(error, 110)).yellow()));
         }

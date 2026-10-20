@@ -46,6 +46,9 @@ réglages), un fichier MKV par source.
 - Si une fenêtre se ferme pendant l'enregistrement, l'image devient noire et
   la source est rattachée automatiquement dès que la fenêtre revient.
 - La mise en veille est bloquée pendant l'enregistrement.
+- Pour arrêter, utiliser Q ou Échap. Fermer la fenêtre de Polyptyque
+  pendant un enregistrement ferme quand même les fichiers proprement, mais
+  la dernière seconde et le récapitulatif sont perdus.
 
 En cas de problème
 ------------------
