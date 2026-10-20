@@ -32,6 +32,10 @@ export struct SourceCard {
     dropped: int,
     warning: string,
     can-open: bool,
+    // Cette source enregistre.
+    recording: bool,
+    // Démarrage ou finalisation en cours : bouton d'enregistrement inactif.
+    busy: bool,
 }
 
 export struct WindowItem {
@@ -133,6 +137,8 @@ export global Bridge {
     callback request-remove-source();
     callback move-source(int);
     callback open-source(string);
+    // Démarre ou arrête l'enregistrement d'une seule source.
+    callback toggle-source(string);
     callback open-settings();
     callback browse-output();
     callback save-settings();

@@ -223,16 +223,51 @@ export component ListRow inherits Rectangle {
     }
 }
 
+// Bouton rond d'enregistrement d'une seule source : point rouge pour
+// démarrer, carré pour arrêter.
+component RecordToggle inherits Rectangle {
+    in property <bool> recording;
+    in property <bool> enabled: true;
+    callback clicked;
+
+    width: 30px;
+    height: 30px;
+    border-radius: 15px;
+    background: touch.has-hover && root.enabled ? Theme.surface-hover : Theme.surface-raised;
+    border-width: 1px;
+    border-color: root.recording ? Theme.recording.with-alpha(0.6) : Theme.border;
+    opacity: root.enabled ? 1 : 0.4;
+    accessible-role: button;
+    accessible-label: root.recording ? "Arrêter cette source" : "Enregistrer cette source";
+    animate background { duration: 120ms; }
+
+    Image {
+        source: root.recording ? @image-url("icons/stop.svg") : @image-url("icons/record.svg");
+        width: 12px;
+        height: 12px;
+        colorize: Theme.recording;
+    }
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
 // Carte d'une source : aperçu, état, son, taille du fichier.
 export component SourceCardView inherits Rectangle {
     in property <SourceCard> card;
-    in property <bool> recording;
     callback open-window();
+    callback toggle-recording();
+
+    property <bool> recording: root.card.recording;
 
     border-radius: Theme.radius;
     background: Theme.surface;
     border-width: 1px;
-    border-color: root.recording && root.card.tone == 1 ? Theme.recording.with-alpha(0.55) : Theme.border;
+    border-color: root.recording ? Theme.recording.with-alpha(0.55) : Theme.border;
     clip: true;
 
     VerticalLayout {
@@ -353,6 +388,14 @@ export component SourceCardView inherits Rectangle {
                     color: root.card.dropped > 0 ? Theme.warning : Theme.text-faint;
                     font-size: Theme.font-small;
                     horizontal-alignment: right;
+                }
+            }
+            RecordToggle {
+                recording: root.recording;
+                enabled: !root.card.busy;
+                y: (parent.height - self.height) / 2;
+                clicked => {
+                    root.toggle-recording();
                 }
             }
         }

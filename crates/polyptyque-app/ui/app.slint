@@ -233,9 +233,11 @@ component PreviewGrid inherits Rectangle {
         width: cell-width;
         height: cell-height;
         card: card;
-        recording: Bridge.recording;
         open-window => {
             Bridge.open-source(card.id);
+        }
+        toggle-recording => {
+            Bridge.toggle-source(card.id);
         }
     }
 }
@@ -354,7 +356,7 @@ component RecordButton inherits Rectangle {
     border-width: Bridge.recording ? 1px : 0;
     border-color: Theme.recording;
     accessible-role: button;
-    accessible-label: Bridge.recording ? "Arrêter l'enregistrement" : "Démarrer l'enregistrement";
+    accessible-label: Bridge.recording ? "Arrêter toutes les sources" : "Démarrer l'enregistrement de toutes les sources";
     animate background { duration: 120ms; }
 
     HorizontalLayout {
@@ -368,7 +370,7 @@ component RecordButton inherits Rectangle {
             colorize: Bridge.recording ? Theme.recording : #ffffff;
         }
         Text {
-            text: Bridge.recording ? "Arrêter" : "Démarrer l'enregistrement";
+            text: Bridge.recording ? "Tout arrêter" : "Démarrer l'enregistrement";
             color: #ffffff;
             font-size: Theme.font-title;
             font-weight: 700;

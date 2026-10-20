@@ -6,6 +6,7 @@
 //! `slint::invoke_from_event_loop`.
 
 use std::cell::{Cell, RefCell};
+use std::collections::HashSet;
 use std::fs;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::PathBuf;
@@ -106,6 +107,8 @@ pub struct App {
     last_disk_check: Cell<Option<Instant>>,
     disk_check_running: Cell<bool>,
     quitting: Cell<bool>,
+    /// Sources en cours de préparation pour rejoindre l'enregistrement.
+    joining: RefCell<HashSet<String>>,
     converter: RefCell<Option<Converter>>,
     conversion: RefCell<ConversionProgress>,
     #[cfg(windows)]
@@ -160,6 +163,7 @@ pub fn run(platform: Arc<dyn Platform>, paths: Paths, initial: Option<Config>) -
         last_disk_check: Cell::new(None),
         disk_check_running: Cell::new(false),
         quitting: Cell::new(false),
+        joining: RefCell::new(HashSet::new()),
         converter: RefCell::new(None),
         conversion: RefCell::new(ConversionProgress::default()),
         #[cfg(windows)]
@@ -253,6 +257,9 @@ fn install_callbacks(ui: &AppWindow) {
     });
     b.on_open_source(|id| {
         with_app(|a| a.open_source(&id));
+    });
+    b.on_toggle_source(|id| {
+        with_app(|a| a.toggle_source(&id));
     });
     b.on_open_settings(|| {
         with_app(|a| a.open_settings());
@@ -360,25 +367,42 @@ impl App {
                 dropped: 0,
                 warning: "".into(),
                 can_open: false,
+                recording: false,
+                busy: false,
             })
             .collect();
         let scene_name = scene.name.clone();
         let source_count = scene.sources.len();
         drop(config);
 
-        // Les aperçus ne signalent que les changements : on garde l'image et
-        // l'état déjà connus de chaque source.
+        // Les aperçus et le moteur ne signalent que les changements : on garde
+        // l'image et l'état déjà connus de chaque source.
         let previous: Vec<SourceCard> = self.cards.iter().collect();
+        let recording = self.recording();
         let cards: Vec<SourceCard> = cards
             .into_iter()
             .map(|mut card| {
-                if let Some(old) = previous.iter().find(|c| c.id == card.id).filter(|_| previews) {
-                    card.preview = old.preview.clone();
-                    card.has_preview = old.has_preview;
+                let Some(old) = previous.iter().find(|c| c.id == card.id) else {
+                    return card;
+                };
+                if previews || old.recording {
                     card.state = old.state.clone();
                     card.tone = old.tone;
+                }
+                if previews {
+                    card.preview = old.preview.clone();
+                    card.has_preview = old.has_preview;
                     card.placeholder = old.placeholder.clone();
                     card.can_open = old.can_open;
+                }
+                if recording {
+                    card.recording = old.recording;
+                    card.busy = old.busy;
+                    card.level = old.level;
+                    card.sound = old.sound;
+                    card.size = old.size.clone();
+                    card.dropped = old.dropped;
+                    card.warning = old.warning.clone();
                 }
                 card
             })
@@ -524,7 +548,6 @@ impl App {
     }
 
     fn tick_previews(&self) {
-        let recording = self.recording();
         let previews = self.previews.borrow();
         for worker in previews.workers() {
             let (frame, state) = worker.take_update();
@@ -553,9 +576,10 @@ impl App {
                         card.has_preview = false;
                     }
                     card.placeholder = placeholder.into();
-                    card.can_open = can_open && !recording;
-                    // Pendant l'enregistrement, l'état affiché est celui du moteur.
-                    if !recording {
+                    card.can_open = can_open && !card.recording;
+                    // Pendant l'enregistrement d'une source, l'état affiché est
+                    // celui du moteur.
+                    if !card.recording {
                         card.state = label.into();
                         card.tone = tone;
                     }
@@ -585,13 +609,17 @@ impl App {
         if self.recording() {
             self.stop_recording(None);
         } else {
-            self.start_recording();
+            self.start_recording(None);
         }
     }
 
-    fn start_recording(&self) {
+    /// Démarre toutes les sources de la scène, ou une seule (`only`).
+    fn start_recording(&self, only: Option<&str>) {
         let config = self.config.borrow().clone();
-        let scene = config.active_scene().clone();
+        let mut scene = config.active_scene().clone();
+        if let Some(id) = only {
+            scene.sources.retain(|s| s.id == id);
+        }
         if scene.sources.is_empty() {
             self.toast("Ajoute d'abord au moins une source à cette scène.", 2);
             return;
@@ -646,11 +674,23 @@ impl App {
                     b.set_elapsed("00:00:00".into());
                     b.set_sheet("".into());
                 });
+                let ids: Vec<&str> = scene.sources.iter().map(|s| s.id.as_str()).collect();
                 for i in 0..self.cards.row_count() {
-                    self.update_card(i, |card| card.can_open = false);
+                    self.update_card(i, |card| {
+                        if ids.contains(&card.id.as_str()) {
+                            card.recording = true;
+                            card.can_open = false;
+                        }
+                    });
                 }
                 if prepared.missing.is_empty() {
-                    self.toast("Enregistrement démarré.", 1);
+                    let message = match scene.sources.as_slice() {
+                        [single] if config.active_scene().sources.len() > 1 => {
+                            format!("Enregistrement de « {} » démarré.", single.name)
+                        }
+                        _ => "Enregistrement démarré.".to_string(),
+                    };
+                    self.toast(&message, 1);
                 } else {
                     self.toast(
                         &format!(
@@ -662,6 +702,99 @@ impl App {
                 }
             }
             Err(e) => self.toast(&format!("Impossible de démarrer : {e:#}"), 3),
+        }
+    }
+
+    /// Bouton d'une carte : démarre ou arrête cette seule source.
+    fn toggle_source(&self, id: &str) {
+        if self.busy.get() || self.joining.borrow().contains(id) {
+            return;
+        }
+        let Some(source) = self.config.borrow().active_scene().sources.iter().find(|s| s.id == id).cloned() else {
+            return;
+        };
+        let state = self.session.borrow().as_ref().map(|s| (s.is_recording(id), s.recording_count()));
+        let Some((recording, count)) = state else {
+            self.start_recording(Some(id));
+            return;
+        };
+        if recording && count <= 1 {
+            // Dernière source : c'est la fin de l'enregistrement.
+            self.stop_recording(None);
+        } else if recording {
+            if let Some(session) = self.session.borrow_mut().as_mut() {
+                session.stop_source(id);
+            }
+            self.set_card(id, |card| {
+                card.busy = true;
+                card.state = "Finalisation…".into();
+                card.tone = 0;
+            });
+            self.toast(
+                &format!("« {} » arrêtée : son fichier est finalisé, les autres sources continuent.", source.name),
+                1,
+            );
+        } else {
+            self.join_recording(source);
+        }
+    }
+
+    /// Ajoute une source à l'enregistrement en cours : sa fenêtre est
+    /// d'abord retrouvée ou ouverte, hors du fil de l'interface.
+    fn join_recording(&self, source: Source) {
+        self.joining.borrow_mut().insert(source.id.clone());
+        self.set_card(&source.id, |card| {
+            card.busy = true;
+            card.state = "Préparation…".into();
+            card.tone = 0;
+        });
+        let platform = self.platform.clone();
+        thread::spawn(move || {
+            let missing = catch_unwind(AssertUnwindSafe(|| {
+                resolve::prepare_windows(platform.as_ref(), std::slice::from_ref(&source), LAUNCH_WAIT, |_| {})
+            }))
+            .unwrap_or_default();
+            post(move |app| app.finish_join(source, missing));
+        });
+    }
+
+    fn finish_join(&self, source: Source, missing: Vec<String>) {
+        self.joining.borrow_mut().remove(&source.id);
+        let result = match self.session.borrow_mut().as_mut() {
+            Some(session) => session.add_source(&source).map(|_| true),
+            // Enregistrement arrêté entre-temps : rien à faire.
+            None => Ok(false),
+        };
+        match result {
+            Ok(true) => {
+                self.set_card(&source.id, |card| {
+                    card.recording = true;
+                    card.busy = false;
+                    card.can_open = false;
+                });
+                if missing.is_empty() {
+                    self.toast(&format!("« {} » enregistre (nouveau fichier).", source.name), 1);
+                } else {
+                    self.toast(
+                        &format!(
+                            "« {} » enregistre, mais sa fenêtre est introuvable : image noire en attendant.",
+                            source.name
+                        ),
+                        2,
+                    );
+                }
+            }
+            Ok(false) => self.set_card(&source.id, |card| card.busy = false),
+            Err(e) => {
+                self.set_card(&source.id, |card| card.busy = false);
+                self.toast(&format!("Impossible d'ajouter « {} » : {e:#}", source.name), 3);
+            }
+        }
+    }
+
+    fn set_card(&self, id: &str, f: impl FnOnce(&mut SourceCard)) {
+        if let Some(index) = (0..self.cards.row_count()).find(|&i| self.cards.row_data(i).is_some_and(|c| c.id == id)) {
+            self.update_card(index, f);
         }
     }
 
@@ -728,13 +861,29 @@ impl App {
             self.with_bridge(|b| b.set_elapsed(elapsed.into()));
             session.status()
         };
+        let joining = self.joining.borrow().clone();
         for status in &statuses {
             let Some(index) = (0..self.cards.row_count())
                 .find(|&i| self.cards.row_data(i).is_some_and(|c| c.id.as_str() == status.id))
             else {
                 continue;
             };
+            if status.state == SourceState::Finished {
+                // Source arrêtée seule : la carte redevient un simple aperçu.
+                self.update_card(index, |card| {
+                    if card.recording || card.busy {
+                        card.recording = false;
+                        card.busy = joining.contains(card.id.as_str());
+                        card.state = "Fichier terminé".into();
+                        card.tone = 0;
+                        card.warning = SharedString::new();
+                    }
+                });
+                continue;
+            }
             self.update_card(index, |card| {
+                card.recording = true;
+                card.busy = status.state == SourceState::Finishing;
                 let (state, tone) = match status.state {
                     SourceState::Connected => ("Enregistre", 1),
                     SourceState::Minimized => ("Réduite (image figée)", 2),
