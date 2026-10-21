@@ -60,7 +60,7 @@ impl VideoTask {
             if capture.is_none() && stop_at.is_none() && now >= next_search {
                 next_search = now + SEARCH_INTERVAL_HNS;
                 let windows = platform.list_windows();
-                if let Some(window) = resolve::find_window(platform.as_ref(), &source, &windows) {
+                if let Some(window) = resolve::find_window(platform.as_ref(), source, &windows) {
                     match platform.open_video_capture(window.handle, width, height, source.capture_cursor) {
                         Ok(c) => {
                             log::info!(
