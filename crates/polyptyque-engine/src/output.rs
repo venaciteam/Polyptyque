@@ -122,6 +122,11 @@ impl OutputTask {
             let streams = Streams { video: video.as_ref(), audio: &audio, video_start, audio_start, resume_seconds };
             let end = match Part::start(platform.as_ref(), &plan, &shared, &output, part, streams) {
                 Ok(running) => running.supervise(&shared, &plan.log),
+                Err(e) if plan.ffmpeg.is_absolute() && !plan.ffmpeg.exists() => PartEnd::Crashed(format!(
+                    "FFmpeg a disparu ({}) : un antivirus l'a peut-être mis en quarantaine ; le restaurer, ou \
+                     réinstaller Polyptyque ({e:#})",
+                    plan.ffmpeg.display()
+                )),
                 Err(e) => PartEnd::Crashed(format!("démarrage de l'encodeur impossible : {e:#}")),
             };
             let nothing_written = match std::fs::metadata(&output) {
@@ -149,8 +154,11 @@ impl OutputTask {
             // la carte, pilote) : la source passe sur le processeur plutôt
             // que de s'arrêter.
             let refused = nvenc_session_refused(&reason);
+            // Sans FFmpeg, changer d'encodeur ne servirait à rien.
+            let ffmpeg_missing = plan.ffmpeg.is_absolute() && !plan.ffmpeg.exists();
             let switch = plan.video
                 && plan.encoder.kind != EncoderKind::Software
+                && !ffmpeg_missing
                 && (refused || quick_failures >= MAX_QUICK_FAILURES);
             if switch {
                 let note = if refused {
