@@ -326,6 +326,9 @@ component PreviewGrid inherits Rectangle {
         open-window => {
             Bridge.open-source(card.id);
         }
+        restore-window => {
+            Bridge.restore-window(card.id);
+        }
         toggle-recording => {
             Bridge.toggle-source(card.id);
         }

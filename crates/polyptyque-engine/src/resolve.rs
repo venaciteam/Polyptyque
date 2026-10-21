@@ -126,6 +126,26 @@ pub fn launch(source: &Source) -> Result<()> {
     }
 }
 
+/// Vrai si un Firefox tourne encore sur le profil de cette source (en cours
+/// de fermeture ou de redémarrage, par exemple). Le relancer afficherait
+/// alors « Firefox est déjà ouvert ». Sous Windows, Firefox garde
+/// `parent.lock` ouvert sans partage tant qu'il tourne : l'ouvrir échoue.
+pub fn profile_in_use(source: &Source) -> bool {
+    /// `ERROR_SHARING_VIOLATION`.
+    const SHARING_VIOLATION: i32 = 32;
+    let SourceKind::Browser { profile_dir, browser, .. } = &source.kind else {
+        return false;
+    };
+    if browser.family != BrowserFamily::Gecko {
+        // Chrome et ses dérivés ouvrent simplement une nouvelle fenêtre.
+        return false;
+    }
+    match fs::File::open(profile_dir.join("parent.lock")) {
+        Ok(_) => false,
+        Err(e) => e.raw_os_error() == Some(SHARING_VIOLATION),
+    }
+}
+
 /// Crée le dossier du profil s'il n'existe pas et y dépose les préférences.
 /// Renvoie vrai s'il s'agit du tout premier lancement.
 pub fn prepare_profile(profile_dir: &Path, family: BrowserFamily) -> Result<bool> {

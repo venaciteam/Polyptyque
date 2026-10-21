@@ -6,7 +6,7 @@
 //! `slint::invoke_from_event_loop`.
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::PathBuf;
@@ -42,6 +42,15 @@ const LAUNCH_WAIT: Duration = Duration::from_secs(30);
 const DISK_STOP_THRESHOLD: u64 = 1_000_000_000;
 const DISK_WARNING_THRESHOLD: u64 = 10_000_000_000;
 const BACKLOG_WARNING_SECONDS: f32 = 2.0;
+/// Fenêtre perdue pendant l'enregistrement : délai avant de rouvrir le
+/// programme automatiquement (le temps qu'il redémarre seul, après une mise
+/// à jour par exemple), puis entre deux essais.
+const AUTO_REOPEN_DELAY: Duration = Duration::from_secs(20);
+const AUTO_REOPEN_RETRY: Duration = Duration::from_secs(60);
+/// Essais automatiques par disparition, puis sur tout l'enregistrement :
+/// au-delà, seul le bouton « Rouvrir » reste.
+const AUTO_REOPEN_TRIES: u32 = 3;
+const AUTO_REOPEN_SESSION_TRIES: u32 = 10;
 const TOAST_DURATION: Duration = Duration::from_secs(7);
 /// Délai avant la première recherche de mise à jour, puis intervalle entre
 /// deux recherches (pour les sessions longues).
@@ -135,6 +144,8 @@ pub struct App {
     session_number: Cell<u64>,
     converter: RefCell<Option<Converter>>,
     conversion: RefCell<ConversionProgress>,
+    /// Fenêtres perdues pendant l'enregistrement, par source.
+    lost_windows: RefCell<HashMap<String, LostWindow>>,
     /// Micros proposés dans les réglages : identifiant et nom.
     mic_choices: RefCell<Vec<(String, String)>>,
     /// Un problème de micro a déjà été signalé pendant cet enregistrement.
@@ -148,6 +159,18 @@ pub struct App {
     /// La fermeture de session Windows est surveillée.
     #[cfg(windows)]
     session_watch: Cell<bool>,
+}
+
+/// Suivi d'une fenêtre perdue pendant l'enregistrement.
+#[derive(Default)]
+struct LostWindow {
+    /// Début de la disparition en cours.
+    since: Option<Instant>,
+    last_try: Option<Instant>,
+    /// Réouvertures automatiques pour cette disparition, puis pour tout
+    /// l'enregistrement.
+    tries: u32,
+    session_tries: u32,
 }
 
 thread_local! {
@@ -203,6 +226,7 @@ pub fn run(platform: Arc<dyn Platform>, paths: Paths, initial: Option<Config>) -
         session_number: Cell::new(0),
         converter: RefCell::new(None),
         conversion: RefCell::new(ConversionProgress::default()),
+        lost_windows: RefCell::new(HashMap::new()),
         mic_choices: RefCell::new(Vec::new()),
         mic_warned: Cell::new(false),
         update: RefCell::new(None),
@@ -311,6 +335,9 @@ fn install_callbacks(ui: &AppWindow) {
     });
     b.on_open_source(|id| {
         with_app(|a| a.open_source(&id));
+    });
+    b.on_restore_window(|id| {
+        with_app(|a| a.restore_window(&id));
     });
     b.on_toggle_source(|id| {
         with_app(|a| a.toggle_source(&id));
@@ -427,6 +454,7 @@ impl App {
                 dropped: 0,
                 warning: "".into(),
                 can_open: false,
+                can_restore: false,
                 recording: false,
                 busy: false,
             })
@@ -454,7 +482,10 @@ impl App {
                     card.preview = old.preview.clone();
                     card.has_preview = old.has_preview;
                     card.placeholder = old.placeholder.clone();
+                }
+                if previews || (recording && old.recording) {
                     card.can_open = old.can_open;
+                    card.can_restore = old.can_restore;
                 }
                 if recording {
                     card.recording = old.recording;
@@ -638,12 +669,13 @@ impl App {
                         card.has_preview = false;
                     }
                     card.placeholder = placeholder.into();
-                    card.can_open = can_open && !card.recording;
-                    // Pendant l'enregistrement d'une source, l'état affiché est
-                    // celui du moteur.
+                    // Pendant l'enregistrement d'une source, l'état affiché et
+                    // les boutons sont ceux du moteur.
                     if !card.recording {
                         card.state = label.into();
                         card.tone = tone;
+                        card.can_open = can_open;
+                        card.can_restore = matches!(state, PreviewState::Minimized);
                     }
                 }
             });
@@ -726,6 +758,7 @@ impl App {
         match Session::start(self.platform.clone(), plan) {
             Ok(session) => {
                 self.mic_warned.set(false);
+                self.lost_windows.borrow_mut().clear();
                 self.set_shutdown_block(true);
                 let microphone = config.settings.microphone.enabled;
                 self.with_bridge(|b| b.set_mic_recording(microphone));
@@ -751,6 +784,7 @@ impl App {
                         if ids.contains(&card.id.as_str()) {
                             card.recording = true;
                             card.can_open = false;
+                            card.can_restore = false;
                         }
                     });
                 }
@@ -848,6 +882,7 @@ impl App {
                     card.recording = true;
                     card.busy = false;
                     card.can_open = false;
+                    card.can_restore = false;
                 });
                 if missing.is_empty() {
                     self.toast(&format!("« {} » enregistre (nouveau fichier).", source.name), 1);
@@ -977,6 +1012,8 @@ impl App {
                     if card.recording || card.busy {
                         card.recording = false;
                         card.busy = false;
+                        card.can_open = false;
+                        card.can_restore = false;
                         card.state = "Fichier terminé".into();
                         card.tone = 0;
                         card.warning = SharedString::new();
@@ -999,6 +1036,8 @@ impl App {
                 };
                 card.state = state.into();
                 card.tone = tone;
+                card.can_restore = status.state == SourceState::Minimized;
+                card.can_open = matches!(status.state, SourceState::Lost | SourceState::Searching);
                 card.level = format::level(status.audio_level);
                 card.sound = status.audio_recent;
                 card.size = format::bytes(status.file_size).into();
@@ -1014,7 +1053,58 @@ impl App {
                 };
             });
         }
+        self.reopen_lost_windows(&statuses);
         self.refresh_disk(false);
+    }
+
+    /// Rouvre le programme d'une source dont la fenêtre a disparu pendant
+    /// l'enregistrement (fermée par erreur, plantée), si la source l'autorise :
+    /// toujours pour un navigateur, sur option pour une application.
+    fn reopen_lost_windows(&self, statuses: &[SourceStatus]) {
+        let now = Instant::now();
+        let mut due = Vec::new();
+        {
+            let mut lost = self.lost_windows.borrow_mut();
+            for status in statuses {
+                let entry = lost.entry(status.id.clone()).or_default();
+                if status.state != SourceState::Lost {
+                    entry.since = None;
+                    entry.last_try = None;
+                    entry.tries = 0;
+                    continue;
+                }
+                let since = *entry.since.get_or_insert(now);
+                let waited = match entry.last_try {
+                    Some(last) => now.duration_since(last) >= AUTO_REOPEN_RETRY,
+                    None => now.duration_since(since) >= AUTO_REOPEN_DELAY,
+                };
+                if waited && entry.tries < AUTO_REOPEN_TRIES && entry.session_tries < AUTO_REOPEN_SESSION_TRIES {
+                    due.push(status.id.clone());
+                }
+            }
+        }
+        for id in due {
+            let source = self.config.borrow().active_scene().sources.iter().find(|s| s.id == id).cloned();
+            let Some(source) = source.filter(Source::should_launch) else {
+                continue;
+            };
+            if resolve::profile_in_use(&source) {
+                // Firefox se ferme ou redémarre encore : on réessaiera.
+                continue;
+            }
+            if let Some(entry) = self.lost_windows.borrow_mut().get_mut(&id) {
+                entry.tries += 1;
+                entry.session_tries += 1;
+                entry.last_try = Some(now);
+            }
+            match resolve::launch(&source) {
+                Ok(()) => {
+                    log::info!("[{}] fenêtre perdue : programme rouvert automatiquement", source.name);
+                    self.toast(&format!("La fenêtre de « {} » a disparu : réouverture automatique.", source.name), 2);
+                }
+                Err(e) => log::warn!("[{}] réouverture automatique impossible : {e:#}", source.name),
+            }
+        }
     }
 
     // ----- Mises à jour -----------------------------------------------------
@@ -1623,10 +1713,45 @@ impl App {
                 return;
             }
         }
+        if resolve::profile_in_use(&source) {
+            self.toast(
+                &format!(
+                    "Firefox n'a pas fini de se fermer pour « {} » : réessaie dans quelques secondes.",
+                    source.name
+                ),
+                2,
+            );
+            return;
+        }
         match resolve::launch(&source) {
             Ok(()) => self.toast(&format!("Ouverture de « {} »…", source.name), 1),
             Err(e) => self.toast(&format!("Impossible d'ouvrir « {} » : {e:#}", source.name), 3),
         }
+    }
+
+    /// Fait revenir la fenêtre réduite d'une source, et la replace sur un
+    /// écran branché si besoin. Hors du fil de l'interface : la fenêtre d'un
+    /// programme figé pourrait faire attendre.
+    fn restore_window(&self, id: &str) {
+        let source = self.config.borrow().active_scene().sources.iter().find(|s| s.id == id).cloned();
+        let Some(source) = source else {
+            return;
+        };
+        let platform = self.platform.clone();
+        thread::spawn(move || {
+            let windows = platform.list_windows();
+            let result = match resolve::find_window(platform.as_ref(), &source, &windows) {
+                Some(window) => platform.restore_window(window.handle),
+                None => Err(anyhow!("fenêtre introuvable")),
+            };
+            post(move |app| match result {
+                Ok(()) => {
+                    log::info!("[{}] fenêtre rétablie à la demande", source.name);
+                    app.toast(&format!("Fenêtre de « {} » rétablie.", source.name), 1);
+                }
+                Err(e) => app.toast(&format!("Impossible de rétablir « {} » : {e:#}", source.name), 3),
+            });
+        });
     }
 
     // ----- Réglages --------------------------------------------------------

@@ -59,6 +59,10 @@ impl Platform for WindowsPlatform {
         windows_list::is_minimized(handle)
     }
 
+    fn restore_window(&self, handle: WindowHandle) -> anyhow::Result<()> {
+        windows_list::restore(handle)
+    }
+
     fn process_command_line(&self, pid: u32) -> Option<String> {
         process::command_line(pid)
     }

@@ -2,13 +2,18 @@
 
 use std::ffi::c_void;
 
+use anyhow::{bail, Result};
 use polyptyque_core::platform::{WindowHandle, WindowInfo};
 use windows::core::BOOL;
-use windows::Win32::Foundation::{HWND, LPARAM, TRUE};
+use windows::Win32::Foundation::{HWND, LPARAM, POINT, RECT, TRUE};
 use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
+use windows::Win32::Graphics::Gdi::{
+    GetMonitorInfoW, MonitorFromPoint, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONULL, MONITOR_DEFAULTTOPRIMARY,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetClassNameW, GetWindow, GetWindowLongW, GetWindowTextW, GetWindowThreadProcessId, IsIconic,
-    IsWindow, IsWindowVisible, GWL_EXSTYLE, GW_OWNER, WS_EX_TOOLWINDOW,
+    EnumWindows, GetClassNameW, GetWindow, GetWindowLongW, GetWindowRect, GetWindowTextW, GetWindowThreadProcessId,
+    IsIconic, IsWindow, IsWindowVisible, SetWindowPos, ShowWindow, GWL_EXSTYLE, GW_OWNER, SWP_NOACTIVATE, SWP_NOZORDER,
+    SW_SHOWNOACTIVATE, WS_EX_TOOLWINDOW,
 };
 
 use crate::process;
@@ -98,4 +103,39 @@ pub fn is_alive(handle: WindowHandle) -> bool {
 
 pub fn is_minimized(handle: WindowHandle) -> bool {
     unsafe { IsIconic(hwnd(handle)).as_bool() }
+}
+
+/// Fait revenir une fenêtre réduite sans lui donner le focus, et la replace
+/// au centre de l'écran principal si elle n'est plus sur aucun écran (écran
+/// débranché, par exemple). Peut attendre le programme de la fenêtre : à
+/// appeler hors du fil de l'interface.
+pub fn restore(handle: WindowHandle) -> Result<()> {
+    let window = hwnd(handle);
+    unsafe {
+        if !IsWindow(Some(window)).as_bool() {
+            bail!("la fenêtre n'existe plus");
+        }
+        if IsIconic(window).as_bool() {
+            let _ = ShowWindow(window, SW_SHOWNOACTIVATE);
+        }
+        if !MonitorFromWindow(window, MONITOR_DEFAULTTONULL).is_invalid() {
+            return Ok(());
+        }
+        let mut rect = RECT::default();
+        GetWindowRect(window, &mut rect)?;
+        let primary = MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTOPRIMARY);
+        let mut info = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+        if !GetMonitorInfoW(primary, &mut info).as_bool() {
+            bail!("écran principal introuvable");
+        }
+        let area = info.rcWork;
+        let (area_width, area_height) = (area.right - area.left, area.bottom - area.top);
+        let width = (rect.right - rect.left).clamp(320.min(area_width), area_width);
+        let height = (rect.bottom - rect.top).clamp(240.min(area_height), area_height);
+        let x = area.left + (area_width - width) / 2;
+        let y = area.top + (area_height - height) / 2;
+        SetWindowPos(window, None, x, y, width, height, SWP_NOZORDER | SWP_NOACTIVATE)?;
+        log::info!("fenêtre replacée sur l'écran principal");
+    }
+    Ok(())
 }

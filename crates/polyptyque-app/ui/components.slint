@@ -260,6 +260,7 @@ component RecordToggle inherits Rectangle {
 export component SourceCardView inherits Rectangle {
     in property <SourceCard> card;
     callback open-window();
+    callback restore-window();
     callback toggle-recording();
 
     property <bool> recording: root.card.recording;
@@ -291,13 +292,23 @@ export component SourceCardView inherits Rectangle {
                     horizontal-alignment: center;
                     wrap: word-wrap;
                 }
-                if root.card.can-open: HorizontalLayout {
-                    alignment: center;
-                    ActionButton {
-                        text: "Ouvrir la fenêtre";
-                        icon: @image-url("icons/launch.svg");
-                        has-icon: true;
-                        clicked => {
+            }
+
+            // Fenêtre réduite ou perdue : de quoi la faire revenir, y compris
+            // pendant l'enregistrement.
+            if root.card.can-restore || root.card.can-open: HorizontalLayout {
+                y: parent.height - 34px - 12px;
+                height: 34px;
+                alignment: center;
+                ActionButton {
+                    text: root.card.can-restore ? "Rétablir la fenêtre"
+                        : root.recording ? "Rouvrir la fenêtre" : "Ouvrir la fenêtre";
+                    icon: root.card.can-restore ? @image-url("icons/restore.svg") : @image-url("icons/launch.svg");
+                    has-icon: true;
+                    clicked => {
+                        if root.card.can-restore {
+                            root.restore-window();
+                        } else {
                             root.open-window();
                         }
                     }

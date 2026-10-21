@@ -7,6 +7,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -22,6 +23,9 @@ struct DemoWindow {
     /// Teinte de l'image (chrominance U, V).
     tint: (u8, u8),
 }
+
+const CHROME: WindowHandle = 2;
+const DISCORD: WindowHandle = 3;
 
 const WINDOWS: [DemoWindow; 4] = [
     DemoWindow {
@@ -51,12 +55,22 @@ const WINDOWS: [DemoWindow; 4] = [
 pub struct DemoPlatform {
     start: Instant,
     root: PathBuf,
+    /// Fenêtre de Discord réduite (`POLYPTYQUE_DEMO_REDUITE`) jusqu'à ce
+    /// qu'elle soit rétablie.
+    discord_minimized: AtomicBool,
+    /// Fenêtre de Chrome fermée (`POLYPTYQUE_DEMO_PERDUE`).
+    chrome_closed: bool,
 }
 
 impl DemoPlatform {
     pub fn new(root: &Path) -> Self {
         let _ = fs::create_dir_all(root.join("tubes"));
-        Self { start: Instant::now(), root: root.to_path_buf() }
+        Self {
+            start: Instant::now(),
+            root: root.to_path_buf(),
+            discord_minimized: AtomicBool::new(std::env::var_os("POLYPTYQUE_DEMO_REDUITE").is_some()),
+            chrome_closed: std::env::var_os("POLYPTYQUE_DEMO_PERDUE").is_some(),
+        }
     }
 
     fn profile(&self, name: &str) -> PathBuf {
@@ -103,6 +117,7 @@ impl Platform for DemoPlatform {
     fn list_windows(&self) -> Vec<WindowInfo> {
         WINDOWS
             .iter()
+            .filter(|w| !(self.chrome_closed && w.handle == CHROME))
             .map(|w| WindowInfo {
                 handle: w.handle,
                 pid: 100 + w.handle as u32,
@@ -113,12 +128,19 @@ impl Platform for DemoPlatform {
             .collect()
     }
 
-    fn is_window_alive(&self, _: WindowHandle) -> bool {
-        true
+    fn is_window_alive(&self, handle: WindowHandle) -> bool {
+        !(self.chrome_closed && handle == CHROME)
     }
 
-    fn is_window_minimized(&self, _: WindowHandle) -> bool {
-        false
+    fn is_window_minimized(&self, handle: WindowHandle) -> bool {
+        handle == DISCORD && self.discord_minimized.load(Ordering::Relaxed)
+    }
+
+    fn restore_window(&self, handle: WindowHandle) -> Result<()> {
+        if handle == DISCORD {
+            self.discord_minimized.store(false, Ordering::Relaxed);
+        }
+        Ok(())
     }
 
     fn process_command_line(&self, pid: u32) -> Option<String> {

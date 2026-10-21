@@ -75,6 +75,13 @@ pub trait Platform: Send + Sync {
     fn list_windows(&self) -> Vec<WindowInfo>;
     fn is_window_alive(&self, handle: WindowHandle) -> bool;
     fn is_window_minimized(&self, handle: WindowHandle) -> bool;
+
+    /// Fait revenir une fenêtre réduite et la replace sur un écran branché
+    /// si besoin, sans lui donner le focus. Peut attendre le programme de la
+    /// fenêtre : à appeler hors du fil de l'interface.
+    fn restore_window(&self, _handle: WindowHandle) -> anyhow::Result<()> {
+        anyhow::bail!("non disponible sur ce système")
+    }
     fn process_command_line(&self, pid: u32) -> Option<String>;
     fn detect_browsers(&self) -> Vec<BrowserInstall>;
 
