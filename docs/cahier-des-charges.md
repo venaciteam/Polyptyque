@@ -351,7 +351,7 @@ Solution retenue : **[[Velopack]]** (outil d'installation et de mise à jour éc
 | Raccourcis | Bureau et menu Démarrer |
 | Dossier d'installation | `%LOCALAPPDATA%\PolyptyqueApp`, distinct des données (`%APPDATA%\Polyptyque`, `%LOCALAPPDATA%\Polyptyque`) : une désinstallation efface tout le dossier d'installation mais conserve scènes, réglages, profils de navigateur (connexions) et journaux |
 | Système minimal | Windows 10 version 2004 ; refus avec explication en dessous |
-| Version portable | `Polyptyque-portable.zip`, sans installation |
+| Version portable | `Polyptyque-portable.zip`, sans installation. **Prévu** : version autonome, avec scènes, réglages, profils de navigateur (connexions) et journaux dans un dossier `données` à côté de `polyptyque.exe`, rien d'écrit ailleurs sur le PC, pour tout emporter d'un ordinateur à l'autre. Les enregistrements restent dans le dossier choisi (repli sur `Vidéos\Polyptyque` s'il n'existe pas sur le nouvel ordinateur) |
 | Mises à jour | Recherche au démarrage puis toutes les 6 h (désactivable) ; proposées d'un clic, téléchargées avec avancement, puis redémarrage ; jamais pendant un enregistrement ou une conversion (sinon installées au prochain démarrage). Source : publications GitHub du dépôt (fonctionne une fois le dépôt public) |
 | Publication | Étiquette `vX.Y.Z` (identique à la version de `Cargo.toml`) : la fabrication publie la version GitHub, avec mise à jour partielle depuis la précédente |
 | Surcoût | Environ 7,5 Mo pour l'installateur, 5 Mo pour l'outil de mise à jour |
@@ -534,6 +534,7 @@ Seule une implémentation de `Platform` est à écrire pour chaque système (`po
 > - [x] Mises à jour proposées depuis les publications GitHub
 > - [x] README complet
 > - [ ] Validation sur la machine de référence
+> - [ ] Version portable autonome (tout dans son dossier), après les tests de fiabilité
 
 > [!todo] Étape 4 - Publication
 > - [ ] Dépôt public, première version publiée
@@ -584,6 +585,8 @@ Seule une implémentation de `Platform` est à écrire pour chaque système (`po
 | 2026-10-20 | Logo : trois panneaux sur un carré arrondi en dégradé (variante C) |
 | 2026-10-20 | Installation dans `%LOCALAPPDATA%\PolyptyqueApp`, séparée des données, conservées à la désinstallation |
 | 2026-10-20 | Mises à jour détectées et proposées d'un clic, jamais pendant un enregistrement ; dépôt rendu public quand tout sera prêt |
+| 2026-10-21 | Version portable autonome : tout dans le dossier de Polyptyque sauf les enregistrements, pour changer de PC sans rien perdre ; à faire après les tests de fiabilité |
+| 2026-10-21 | Recherche du meilleur encodeur conservée à chaque démarrage d'enregistrement (garantit un encodeur fonctionnel, environ une seconde) |
 
 ---
 
