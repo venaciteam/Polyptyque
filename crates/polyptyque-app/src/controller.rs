@@ -75,6 +75,10 @@ enum Confirm {
     QuitWhileConverting,
     CancelConversion,
     InstallUpdate,
+    /// Reprendre l'enregistrement de cette scène, arrêté par une mise en
+    /// veille.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    ResumeAfterSleep(String),
 }
 
 /// Où en est la mise à jour proposée.
@@ -172,6 +176,10 @@ pub struct App {
     /// La fermeture de session Windows est surveillée.
     #[cfg(windows)]
     session_watch: Cell<bool>,
+    /// Enregistrement arrêté par une mise en veille : scène et heure, pour
+    /// proposer de le reprendre au réveil.
+    #[cfg(windows)]
+    sleep_stop: RefCell<Option<(String, String)>>,
 }
 
 /// Enregistrement interrompu trouvé au lancement.
@@ -277,6 +285,8 @@ pub fn run(platform: Arc<dyn Platform>, paths: Paths, initial: Option<Config>) -
         hotkeys: RefCell::new(None),
         #[cfg(windows)]
         session_watch: Cell::new(false),
+        #[cfg(windows)]
+        sleep_stop: RefCell::new(None),
     });
     APP.with(|a| *a.borrow_mut() = Some(app.clone()));
     *app.converter.borrow_mut() =
@@ -826,6 +836,7 @@ impl App {
                     scene_id: scene.id.clone(),
                     scene_name: scene.name.clone(),
                     files: session.outputs(),
+                    ended_by_windows: false,
                 };
                 *self.session.borrow_mut() = Some(session);
                 self.start_session_record(record);
@@ -1265,7 +1276,12 @@ impl App {
             .collect();
         let text = match &record {
             Some(r) => format!(
-                "Polyptyque s'est fermé pendant l'enregistrement commencé le {} à {} (scène « {} »). {}",
+                "{} pendant l'enregistrement commencé le {} à {} (scène « {} »). {}",
+                if r.ended_by_windows {
+                    "Windows s'est éteint, a redémarré ou a fermé la session"
+                } else {
+                    "Polyptyque s'est fermé"
+                },
                 display_date(&r.date),
                 r.time,
                 r.scene_name,
@@ -2249,7 +2265,7 @@ impl App {
     }
 
     fn ask(&self, action: Confirm, title: &str, text: &str, button: &str) {
-        let danger = !matches!(action, Confirm::InstallUpdate);
+        let danger = !matches!(action, Confirm::InstallUpdate | Confirm::ResumeAfterSleep(_));
         *self.confirm.borrow_mut() = Some(action);
         self.with_bridge(|b| {
             b.set_confirm_danger(danger);
@@ -2286,6 +2302,16 @@ impl App {
                 self.restart_previews();
             }
             Some(Confirm::InstallUpdate) => self.download_update(),
+            Some(Confirm::ResumeAfterSleep(scene_id)) => {
+                if !self.recording() && !self.busy.get() {
+                    if self.config.borrow().active_scene != scene_id
+                        && self.config.borrow().scenes.iter().any(|s| s.id == scene_id)
+                    {
+                        self.select_scene(&scene_id);
+                    }
+                    self.start_recording(None);
+                }
+            }
             Some(Confirm::CancelConversion) => {
                 if let Some(converter) = self.converter.borrow().as_ref() {
                     self.conversion.borrow_mut().cancelled = true;
@@ -2388,7 +2414,47 @@ impl App {
                 self.finalize_now();
                 false
             }
+            // Traités juste après, hors du traitement du message de Windows.
+            SessionEnd::Suspend => {
+                post(|app| app.on_suspend());
+                false
+            }
+            SessionEnd::Resume => {
+                post(|app| app.on_resume());
+                false
+            }
         }
+    }
+
+    /// Mise en veille pendant un enregistrement : impossible à empêcher. On
+    /// arrête proprement plutôt que de laisser l'enregistrement reprendre au
+    /// réveil avec toute la durée de la veille en image figée.
+    #[cfg(windows)]
+    fn on_suspend(&self) {
+        if !self.recording() {
+            return;
+        }
+        log::warn!("mise en veille pendant l'enregistrement : arrêt propre");
+        let scene_id = self.config.borrow().active_scene.clone();
+        let (_, time) = naming::now_parts();
+        *self.sleep_stop.borrow_mut() = Some((scene_id, time));
+        self.stop_recording(Some("Mise en veille de l'ordinateur : enregistrement arrêté.".into()));
+    }
+
+    #[cfg(windows)]
+    fn on_resume(&self) {
+        let Some((scene_id, time)) = self.sleep_stop.borrow_mut().take() else {
+            return;
+        };
+        log::info!("sortie de veille : reprise de l'enregistrement proposée");
+        self.ask(
+            Confirm::ResumeAfterSleep(scene_id),
+            "Reprendre l'enregistrement ?",
+            &format!(
+                "L'enregistrement a été arrêté proprement à {time}, juste avant la mise en veille de l'ordinateur. Le reprendre maintenant (dans de nouveaux fichiers) ?"
+            ),
+            "Reprendre",
+        );
     }
 
     /// La session Windows se ferme malgré tout : les fichiers sont
@@ -2403,12 +2469,22 @@ impl App {
         }
         // Arrêt déjà en cours : on attend qu'il se termine.
         let stopping = self.stop_thread.try_borrow_mut().ok().and_then(|mut t| t.take());
+        let stopped_by_user = stopping.is_some();
         if let Some(handle) = stopping {
             let _ = handle.join();
         }
         if let Ok(mut record) = self.session_record.try_borrow_mut() {
-            record.take();
-            SessionRecord::clear(&paths::session_record_file());
+            match record.take() {
+                // Enregistrement coupé par Windows : au prochain lancement, le
+                // bilan proposera de le reprendre.
+                Some(mut interrupted) if !stopped_by_user => {
+                    interrupted.ended_by_windows = true;
+                    if let Err(e) = interrupted.save(&paths::session_record_file()) {
+                        log::warn!("journal de session : {e:#}");
+                    }
+                }
+                _ => SessionRecord::clear(&paths::session_record_file()),
+            }
         }
         // Une conversion interrompue efface son fichier partiel.
         let converter = self.converter.try_borrow_mut().ok().and_then(|mut c| c.take());
@@ -2429,6 +2505,7 @@ impl App {
         } else {
             polyptyque_windows::session_end::unblock(window);
         }
+        polyptyque_windows::session_end::restart_after_interruption(on);
     }
 
     #[cfg(not(windows))]

@@ -25,6 +25,10 @@ pub struct SessionRecord {
     pub scene_name: String,
     /// Fichiers de la session, dans l'ordre (parties et micro compris).
     pub files: Vec<PathBuf>,
+    /// Windows a fermé la session (arrêt, redémarrage) pendant
+    /// l'enregistrement : les fichiers ont été finalisés.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub ended_by_windows: bool,
 }
 
 impl SessionRecord {
@@ -64,6 +68,7 @@ mod tests {
             scene_id: "abc".into(),
             scene_name: "Scène principale".into(),
             files: vec![PathBuf::from("J:/a.mkv"), PathBuf::from("J:/a_partie2.mkv")],
+            ended_by_windows: false,
         };
         record.save(&path).unwrap();
         assert_eq!(SessionRecord::load(&path).unwrap(), Some(record));
