@@ -98,8 +98,11 @@ Confidentialité et sécurité > Microphone.
 - Si le dossier d'enregistrement devient inaccessible (disque externe
   débranché), la suite est enregistrée dans Vidéos\Polyptyque.
 - La mise en veille automatique est empêchée pendant l'enregistrement. Une
-  mise en veille demandée (capot fermé, bouton, menu) reste possible : à
-  éviter pendant un enregistrement.
+  mise en veille demandée (capot fermé, bouton, menu) ne peut pas l'être :
+  l'enregistrement est alors arrêté proprement, et Polyptyque propose de le
+  reprendre au réveil.
+- Longues sessions : régler les « heures d'activité » de Windows Update sur
+  la plage où l'on enregistre, pour qu'il ne redémarre pas l'ordinateur.
 - Fermer Polyptyque pendant un enregistrement demande une confirmation,
   puis finalise les fichiers avant de quitter.
 - Éteindre ou redémarrer Windows pendant un enregistrement : Windows affiche

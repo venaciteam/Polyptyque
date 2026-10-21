@@ -53,7 +53,8 @@ Polyptyque fait l'inverse : **chaque fenêtre est enregistrée à part**, dans s
 - Une fenêtre fermée ou plantée donne une image noire, puis est rattachée automatiquement dès qu'elle revient. Un navigateur fermé par erreur est rouvert tout seul ; une fenêtre réduite revient d'un clic, même si son écran a été débranché.
 - Disque externe débranché en cours de route : la suite est enregistrée dans `Vidéos\Polyptyque`.
 - Réglages protégés : version précédente et sauvegarde quotidienne, restaurées automatiquement si le fichier est abîmé.
-- Espace disque surveillé, avec arrêt propre s'il vient à manquer. Mise en veille automatique empêchée (une mise en veille demandée, capot fermé par exemple, reste possible).
+- Espace disque surveillé, avec arrêt propre s'il vient à manquer.
+- Mise en veille automatique empêchée. Une mise en veille demandée (capot fermé, bouton) ne peut pas l'être : l'enregistrement est alors arrêté proprement, et sa reprise proposée au réveil.
 - Si Windows s'éteint ou se déconnecte pendant un enregistrement, il le signale et laisse annuler ; sinon, les fichiers sont finalisés avant la fermeture.
 
 **Il retrouve vos fenêtres**
@@ -63,7 +64,7 @@ Polyptyque fait l'inverse : **chaque fenêtre est enregistrée à part**, dans s
 **Simple à utiliser**
 - Scènes (groupes de sources), aperçus en direct de chaque source, raccourcis clavier globaux.
 - Un bouton pour tout enregistrer, ou un bouton par source pour enregistrer une source seule.
-- Encodage par la carte graphique (NVIDIA, AMD, Intel) quand elle est disponible, ou par le processeur.
+- Encodage par la carte graphique (NVIDIA, AMD, Intel) quand elle est disponible, ou par le processeur. Si la carte refuse un encodage de plus (limite des cartes GeForce, autres logiciels compris), la source passe seule sur le processeur.
 
 ## Léger par conception
 
@@ -87,6 +88,9 @@ Polyptyque doit tourner pendant des heures à côté d'un jeu, d'un appel vidéo
 **Installer**
 1. Télécharger `Polyptyque-Setup.exe` depuis la page des [versions](https://github.com/venaciteam/Polyptyque/releases).
 2. Le lancer : aucune question, aucun droit administrateur. Polyptyque s'ouvre à la fin, avec un raccourci sur le Bureau et dans le menu Démarrer.
+
+> [!TIP]
+> Pour les longues sessions, régler les « heures d'activité » de Windows Update (dans ses options avancées) sur la plage où l'on enregistre : Windows ne redémarre pas de lui-même pendant ces heures, sauf mise à jour imposée par une entreprise.
 
 > [!NOTE]
 > Polyptyque n'est pas encore signé numériquement. Windows peut afficher « Windows a protégé votre ordinateur » : cliquer sur « Informations complémentaires », puis « Exécuter quand même ».

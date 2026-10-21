@@ -203,7 +203,8 @@ Au démarrage d'un enregistrement, pour chaque source enregistrée (les aperçus
 	- **Réouverture automatique** après 20 s pour les navigateurs et les applications dont la relance est activée : trois essais par disparition, dix par enregistrement. Firefox encore en train de se fermer ou de redémarrer n'est pas relancé (il afficherait « Firefox est déjà ouvert »).
 - **Fenêtre réduite** : Windows ne la dessine plus, l'image se fige ; un avertissement s'affiche, avec un bouton **« Rétablir la fenêtre »** qui la fait revenir sans lui donner le focus et la replace sur l'écran principal si elle n'est plus sur aucun écran (écran débranché).
 - **Fenêtre redimensionnée** : la résolution du fichier reste fixe, l'image est mise à l'échelle en conservant ses proportions, avec des bandes noires si besoin.
-- **Mise en veille automatique de Windows empêchée** pendant l'enregistrement. Une mise en veille demandée (capot, bouton, menu) ne peut pas l'être : voir B3 dans l'[[analyse-des-risques|analyse des risques]].
+- **Mise en veille automatique de Windows empêchée** pendant l'enregistrement. Une mise en veille demandée (capot, bouton, menu) ne peut pas l'être : Windows prévient quelques secondes avant, l'enregistrement est arrêté proprement, et sa reprise est proposée au réveil (voir B3 dans l'[[analyse-des-risques|analyse des risques]]).
+- **Encodeur de la carte graphique refusé** (limite d'encodages simultanés des cartes GeForce, autres logiciels compris ; pilote) : la source passe seule sur le processeur, dans une nouvelle partie, avec un message.
 - **Encodeur arrêté ou figé** (plantage de FFmpeg, pilote, 30 s sans avancer) : la capture continue et un nouvel encodeur reprend dans un nouveau fichier `…_partie2.mkv`, image et son recalés au même instant. Trois échecs d'affilée dès le démarrage arrêtent la source, pour ne pas tourner en boucle.
 - **Dossier d'enregistrement inaccessible** (disque externe débranché, autre PC) : au démarrage comme en cours de route, la suite est enregistrée dans `Vidéos\Polyptyque`, avec un message.
 - **Erreur interne** dans la capture d'une source : la capture est relancée au même point de l'horloge (image et son restent calés) ; au-delà de trois relances, la source passe en erreur, sans toucher aux autres.
@@ -555,6 +556,7 @@ Seule une implémentation de `Platform` est à écrire pour chaque système (`po
 > - [x] Boutons « Rouvrir la fenêtre » pendant l'enregistrement, réouverture automatique
 > - [x] Conversion MP4 sous un nom temporaire jusqu'à sa vérification (A6, avancé du lot 2)
 > - [x] Journal : passages en « Réduite », bilan de fin par source ; son déclaré stéréo à FFmpeg
+> - [x] Lot 2 et 3 avancés : mise en veille (arrêt propre, reprise proposée), relance par Windows après un redémarrage, bascule sur le processeur, journaux de plus de 30 jours effacés
 > - [ ] Validation sur la machine de référence
 
 > [!todo] Étape 4 - Publication
@@ -614,6 +616,7 @@ Seule une implémentation de `Platform` est à écrire pour chaque système (`po
 | 2026-10-22 | Enregistrement interrompu : bilan au lancement suivant ; réparation et reprise proposées d'un clic, jamais automatiques ; la réparation remplace l'original une fois la copie vérifiée (choix provisoires, à confirmer) |
 | 2026-10-22 | Réglages : version précédente et cinq sauvegardes quotidiennes, restauration automatique d'un fichier abîmé ou vide |
 | 2026-10-22 | Une seule copie de Polyptyque par session Windows ; dossier de secours `Vidéos\Polyptyque` si le dossier choisi devient inaccessible |
+| 2026-10-22 | Mise en veille pendant un enregistrement : arrêt propre et reprise proposée au réveil, plutôt qu'une pause (choix provisoire) ; journaux conservés 30 jours |
 | 2026-10-22 | Version portable : données dans `données` à la racine du dossier décompressé, hors du dossier `current` que les mises à jour remplacent |
 
 ---

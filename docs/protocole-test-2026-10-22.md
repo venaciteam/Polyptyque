@@ -103,7 +103,10 @@ type: guide
 - [ ] **C6 - Journal**
 	- Faire : après C1, ouvrir le dernier `polyptyque_….log` des journaux.
 	- Attendu : lignes « fenêtre réduite : image figée… », « fenêtre rétablie » et, à l'arrêt, une ligne « bilan » par source (durée, fichiers, taille, images écrites, perdues et reçues).
-- [ ] **C7 - Disque débranché pendant l'enregistrement** (si une clé ou un disque USB est disponible)
+- [ ] **C7 - Mise en veille**
+	- Faire : pendant un enregistrement, Démarrer > Marche/Arrêt > Mettre en veille. Réveiller l'ordinateur après une minute.
+	- Attendu : au réveil, l'enregistrement est arrêté (message « Mise en veille de l'ordinateur : enregistrement arrêté ») et une fenêtre propose « Reprendre l'enregistrement ? ». Les fichiers d'avant la veille sont complets et ne contiennent pas la minute de veille.
+- [ ] **C8 - Disque débranché pendant l'enregistrement** (si une clé ou un disque USB est disponible)
 	- Faire : enregistrer sur la clé, la débrancher au bout d'une minute, attendre une minute, puis « Tout arrêter ».
 	- Attendu : les cartes affichent « Dossier … inaccessible : la suite est enregistrée dans … » ; la suite de chaque source est dans `Vidéos\Polyptyque\…_partie2.mkv`.
 

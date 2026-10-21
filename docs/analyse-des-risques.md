@@ -16,7 +16,7 @@ type: projet
 > Complète le [[cahier-des-charges|cahier des charges]].
 
 > [!success] Mise à jour du 2026-10-22
-> Le **lot 1** est réalisé (à tester sur la machine de référence), ainsi que la conversion MP4 sous nom temporaire (A6, lot 2). Les colonnes « Aujourd'hui » décrivent l'état **avant** ces travaux ; le [[#Plan d'action proposé|plan d'action]] indique ce qui est fait.
+> Le **lot 1** est réalisé (à tester sur la machine de référence), ainsi que, des lots 2 et 3 : conversion MP4 sous nom temporaire (A6), mise en veille (B3), relance après un redémarrage (B2), bascule sur le processeur (D2), nettoyage des journaux (A7). Les colonnes « Aujourd'hui » décrivent l'état **avant** ces travaux ; le [[#Plan d'action proposé|plan d'action]] indique ce qui est fait.
 
 ## Table des matières
 
@@ -159,17 +159,17 @@ Chaque scénario porte un identifiant (A1, B3…) repris dans le plan d'action.
 ### Lot 2 - Situations prévisibles
 
 > [!todo] Priorité 2
-> - [ ] **Mise en veille** (B3) : Polyptyque s'inscrit pour être prévenu par Windows quelques secondes avant la veille, et ferme alors les fichiers proprement. Au réveil, il propose la reprise ou reprend seul dans une nouvelle partie, selon la réponse aux [[#Questions ouvertes]]. La durée de la veille n'est plus comblée d'images figées.
-> - [ ] **Après un redémarrage de Windows Update** (B2) : conseil sur les heures d'activité (README et interface) ; bilan et reprise au lancement suivant (lot 1) ; relance automatique de Polyptyque par Windows quand l'utilisateur l'a autorisée (à tester).
+> - [x] **Mise en veille** (B3) : *réalisé : arrêt propre et reprise proposée au réveil (choix provisoire).* Polyptyque s'inscrit pour être prévenu par Windows quelques secondes avant la veille, et ferme alors les fichiers proprement. Au réveil, il propose la reprise ou reprend seul dans une nouvelle partie, selon la réponse aux [[#Questions ouvertes]]. La durée de la veille n'est plus comblée d'images figées.
+> - [x] **Après un redémarrage de Windows Update** (B2) : *réalisé : conseil dans le README et le LISEZMOI (pas encore dans l'interface), relance demandée à Windows, bilan « Windows s'est éteint… » avec reprise.* conseil sur les heures d'activité (README et interface) ; bilan et reprise au lancement suivant (lot 1) ; relance automatique de Polyptyque par Windows quand l'utilisateur l'a autorisée (à tester).
 > - [ ] **Mises à jour de Polyptyque** (A8) : passer à la première version stable de Velopack qui corrige l'échec du remplacement.
-> - [ ] **Limite d'encodages de la carte NVIDIA** (D2) : bascule automatique sur le processeur pour la source refusée.
+> - [x] **Limite d'encodages de la carte NVIDIA** (D2) : bascule automatique sur le processeur pour la source refusée.
 > - [ ] **FAT32** (D5) : avertissement et découpage propre avant 4 Go.
 > - [x] **Conversion MP4** (A6) : nom temporaire jusqu'à la vérification.
 
 ### Lot 3 - Confort et prévention
 
 > [!todo] Priorité 3
-> - [ ] Journaux supprimés après 30 jours (A7).
+> - [x] Journaux supprimés après 30 jours (A7).
 > - [ ] Arrêt d'urgence par raccourci, même si l'interface est figée (A3).
 > - [ ] Profil de navigateur disparu signalé (C3) ; navigateur déplacé retrouvé (C4).
 > - [ ] Annulation d'une suppression (E2).
