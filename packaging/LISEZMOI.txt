@@ -80,7 +80,9 @@ Confidentialité et sécurité > Microphone.
   figée). Une fenêtre cachée derrière une autre se filme normalement.
 - Si une fenêtre se ferme pendant l'enregistrement, l'image devient noire et
   la source est rattachée automatiquement dès que la fenêtre revient.
-- La mise en veille est bloquée pendant l'enregistrement.
+- La mise en veille automatique est empêchée pendant l'enregistrement. Une
+  mise en veille demandée (capot fermé, bouton, menu) reste possible : à
+  éviter pendant un enregistrement.
 - Fermer Polyptyque pendant un enregistrement demande une confirmation,
   puis finalise les fichiers avant de quitter.
 - Éteindre ou redémarrer Windows pendant un enregistrement : Windows affiche

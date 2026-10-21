@@ -49,7 +49,7 @@ Polyptyque fait l'inverse : **chaque fenêtre est enregistrée à part**, dans s
 - Fichiers écrits au fil de l'eau : un plantage ne fait perdre qu'environ une seconde, et un fichier coupé net (panne de courant) reste lisible.
 - Si l'encodeur s'arrête ou se fige, Polyptyque le relance seul, dans un nouveau fichier, sans interrompre les autres sources.
 - Une fenêtre fermée ou plantée donne une image noire, puis est rattachée automatiquement dès qu'elle revient.
-- Espace disque surveillé, avec arrêt propre s'il vient à manquer. Mise en veille bloquée.
+- Espace disque surveillé, avec arrêt propre s'il vient à manquer. Mise en veille automatique empêchée (une mise en veille demandée, capot fermé par exemple, reste possible).
 - Si Windows s'éteint ou se déconnecte pendant un enregistrement, il le signale et laisse annuler ; sinon, les fichiers sont finalisés avant la fermeture.
 
 **Il retrouve vos fenêtres**

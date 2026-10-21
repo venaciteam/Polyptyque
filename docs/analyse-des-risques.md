@@ -67,7 +67,7 @@ Chaque scénario porte un identifiant (A1, B3…) repris dans le plan d'action.
 | A5 | Fichier de réglages abîmé (scènes, sources) | faible | critique | Copie dans `config.toml.invalide`, puis réglages vierges ; la sauvegarde suivante remplace l'original. Écriture atomique, mais sans forçage sur le disque : une coupure de courant juste après une sauvegarde peut laisser un fichier vide | Écriture forcée sur le disque ; cinq sauvegardes tournantes ; restauration automatique de la dernière bonne, avec message | P1 |
 | A6 | Conversion MP4 interrompue (plantage, coupure) | faible | moyenne | Le MP4 partiel garde son nom définitif et semble valide alors qu'il est tronqué | Écriture sous un nom temporaire, renommé seulement après vérification ; restes supprimés au démarrage | P2 |
 | A7 | Journaux qui s'accumulent | forte | faible | Un journal par lancement et un dossier par session, jamais supprimés | Suppression automatique après 30 jours | P3 |
-| A8 | Mise à jour interrompue | faible | moyenne | Velopack remplace le dossier du programme d'un bloc ; en cas d'échec, l'ancienne version est relancée (documentation Velopack) | Rien à ajouter | — |
+| A8 | Mise à jour interrompue ou bloquée | faible | moyenne | Velopack 1.2.161 remplace le dossier du programme en deux temps : l'ancien est mis de côté, puis le nouveau prend sa place. Si le premier temps échoue (fichier verrouillé), l'ancienne version est relancée. Si le second échoue (par exemple un antivirus qui analyse les nouveaux fichiers), la copie mise de côté est effacée : Polyptyque ne démarre plus et doit être réinstallé ; réglages, scènes et profils, rangés ailleurs, sont conservés. Vérifié dans le code de Velopack, qui a corrigé ce défaut le 2026-10-10, pour l'instant seulement dans une préversion | Passer à la première version stable de Velopack qui contient ce correctif (pas de préversion) | P2 |
 | A9 | Mémoire qui grimpe sur 12 h | inconnue | forte | Non mesuré | Mesure pendant le test d'endurance (Gestionnaire des tâches, en début et en fin de session) | test |
 
 ## B - Windows et le matériel
@@ -75,8 +75,8 @@ Chaque scénario porte un identifiant (A1, B3…) repris dans le plan d'action.
 | N° | Scénario | Prob. | Grav. | Aujourd'hui | Proposition | Prio. |
 |---|---|---|---|---|---|---|
 | B1 | Coupure de courant, écran bleu | faible | critique | Fichiers MKV lisibles (écrits par blocs d'une seconde) ; la fin est perdue, y compris ce que Windows n'avait pas encore écrit sur le disque (non mesuré). Fichiers sans index : le déplacement dans la vidéo est lent en montage. Rien n'est signalé au redémarrage | Au redémarrage : session interrompue détectée (A1), fichiers **réparés sans réencodage** (index reconstruit), reprise proposée | P1 |
-| B2 | Redémarrage forcé par Windows Update | moyenne | forte | Blocage avec explication dans l'écran d'arrêt ; si l'arrêt est forcé, fichiers finalisés. Pas de reprise après le redémarrage | %%RECHERCHE-B2%% | P2 |
-| B3 | Mise en veille demandée (capot fermé, bouton, menu) | moyenne | forte | La mise en veille **automatique** est empêchée pendant l'enregistrement, pas celle-ci. Comportement de l'horloge au réveil : %%RECHERCHE-B3%% | %%PROPOSITION-B3%% | P2 |
+| B2 | Redémarrage forcé par Windows Update | moyenne | forte | Blocage avec explication dans l'écran d'arrêt ; si l'arrêt est forcé, fichiers finalisés. Pas de reprise après le redémarrage. Windows Update ne redémarre automatiquement qu'en dehors des « heures d'activité » (8 h-17 h par défaut, plage réglable jusqu'à 18 h), sauf échéance imposée par une entreprise ; Microsoft écrit désormais « dans la mesure du possible » | **Prévenir** : conseiller de régler les heures d'activité sur la plage des sessions. **Reprendre** : bilan et reprise au lancement suivant (journal de session, lot 1). **Relancer** : demander à Windows de relancer Polyptyque après le redémarrage (`RegisterApplicationRestart`) ; Windows ne le fait que si l'utilisateur a activé la relance des applications à la connexion, désactivée par défaut, et la doc ne dit pas si Windows Update la déclenche (à tester) | P2 |
+| B3 | Mise en veille demandée (capot fermé, bouton, menu) | moyenne | forte | La mise en veille **automatique** est empêchée pendant l'enregistrement ; celle-ci ne peut pas l'être (documenté par Microsoft). Polyptyque n'est pas prévenu. Son horloge continue d'avancer pendant la veille (documenté) : au réveil, les fichiers restent calés entre eux, et la durée de la veille y est comblée par une image figée et du silence. D'après le code (non testé) : l'encodeur doit ensuite traiter d'un coup toutes les images de la veille (216 000 pour une heure à 60 images/s) ; pendant ce rattrapage, qui peut durer plusieurs minutes, l'image enregistrée reste figée alors que le son est normal | Être prévenu par Windows quelques secondes avant la veille (inscription nécessaire sur les portables récents en « veille moderne ») : fichiers fermés proprement ; au réveil, reprise proposée ou automatique dans une nouvelle partie, sans combler la veille d'images figées | P2 |
 | B4 | Écran débranché avec des fenêtres capturées (vu en test le 2026-10-21) | moyenne | moyenne | Les fenêtres passent « Réduites » : image figée (noire ici), son conservé, reprise dès leur retour | Bouton « Rétablir la fenêtre » sur la carte (déjà prévu) | P1 |
 | B5 | Verrouillage de la session (Win+L) | moyenne | forte | L'écran reste allumé pendant l'enregistrement, donc pas de verrouillage automatique. Capture pendant un verrouillage manuel : **à vérifier** | Selon le test : avertissement, ou reprise automatique au déverrouillage | test |
 | B6 | Redémarrage du pilote graphique | faible | forte | Probable (non testé) : capture perdue puis rattachée, encodeur relancé dans une nouvelle partie | Rien à ajouter si le test le confirme | test |
@@ -155,8 +155,9 @@ Chaque scénario porte un identifiant (A1, B3…) repris dans le plan d'action.
 ### Lot 2 - Situations prévisibles
 
 > [!todo] Priorité 2
-> - [ ] **Mise en veille** (B3) : %%PROPOSITION-B3-PLAN%%
-> - [ ] **Après un redémarrage de Windows Update** (B2) : %%PROPOSITION-B2-PLAN%%
+> - [ ] **Mise en veille** (B3) : Polyptyque s'inscrit pour être prévenu par Windows quelques secondes avant la veille, et ferme alors les fichiers proprement. Au réveil, il propose la reprise ou reprend seul dans une nouvelle partie, selon la réponse aux [[#Questions ouvertes]]. La durée de la veille n'est plus comblée d'images figées.
+> - [ ] **Après un redémarrage de Windows Update** (B2) : conseil sur les heures d'activité (README et interface) ; bilan et reprise au lancement suivant (lot 1) ; relance automatique de Polyptyque par Windows quand l'utilisateur l'a autorisée (à tester).
+> - [ ] **Mises à jour de Polyptyque** (A8) : passer à la première version stable de Velopack qui corrige l'échec du remplacement.
 > - [ ] **Limite d'encodages de la carte NVIDIA** (D2) : bascule automatique sur le processeur pour la source refusée.
 > - [ ] **FAT32** (D5) : avertissement et découpage propre avant 4 Go.
 > - [ ] **Conversion MP4** (A6) : nom temporaire jusqu'à la vérification.
@@ -201,4 +202,27 @@ Chaque scénario porte un identifiant (A1, B3…) repris dans le plan d'action.
 
 ## Sources
 
-%%SOURCES%%
+> [!info] Consultées le 2026-10-21
+> Sources officielles en priorité ; les sources tierces sont signalées.
+
+**Windows**
+- [Horodatages haute précision](https://learn.microsoft.com/en-us/windows/win32/sysinfo/acquiring-high-resolution-time-stamps) (Microsoft) : l'horloge QPC continue d'avancer pendant la veille et l'hibernation (B3).
+- [std::time::Instant](https://doc.rust-lang.org/std/time/struct.Instant.html) (Rust) : repose sur QPC sous Windows (B3).
+- [SetThreadExecutionState](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-setthreadexecutionstate) et [PowerSetRequest](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-powersetrequest) (Microsoft) : une mise en veille demandée par l'utilisateur ne peut pas être empêchée (B3).
+- [PBT_APMSUSPEND](https://learn.microsoft.com/en-us/windows/win32/power/pbt-apmsuspend) et [WM_POWERBROADCAST](https://learn.microsoft.com/en-us/windows/win32/power/wm-powerbroadcast) (Microsoft) : avertissement environ deux secondes avant la veille, messages de réveil (B3).
+- [Desktop Activity Moderator](https://learn.microsoft.com/en-us/windows/win32/w8cookbook/desktop-activity-moderator) et [Préparer un logiciel à la veille moderne](https://learn.microsoft.com/en-us/windows-hardware/design/device-experiences/prepare-software-for-modern-standby) (Microsoft) : en veille moderne, seules les applications inscrites sont prévenues (B3).
+- [RegisterApplicationRestart](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-registerapplicationrestart) et [Relance des applications](https://learn.microsoft.com/en-us/windows/win32/recovery/registering-for-application-restart) (Microsoft) : relance après un plantage ou un redémarrage, conditions (B2).
+- [Windows 10 Insider Preview build 18965](https://blogs.windows.com/windows-insider/2019/08/21/announcing-windows-10-insider-preview-build-18965/) (Microsoft) : réglage de relance des applications à la connexion, désactivé par défaut (B2).
+- [Redémarrages après une mise à jour](https://learn.microsoft.com/en-us/windows/deployment/update/waas-restart), [Heures d'activité](https://support.microsoft.com/en-us/windows/deployment/updates-lifecycle/keep-your-pc-up-to-date-with-active-hours) et [Échéances imposées](https://learn.microsoft.com/en-us/windows/deployment/update/wufb-compliancedeadlines) (Microsoft) : pas de redémarrage automatique pendant les heures d'activité, plage de 18 h au plus, exceptions (B2).
+- [KB5121772](https://support.microsoft.com/en-us/servicing/os/windows/docs/2026/07/kb5121772-one-restart-a-month-for-windows-updates) (Microsoft) : redémarrage hors des heures d'activité « dans la mesure du possible » (B2).
+
+**NVIDIA et FFmpeg**
+- [Matrice de prise en charge NVENC](https://developer.nvidia.com/video-encode-and-decode-gpu-support-matrix-new) (NVIDIA) : 12 encodages simultanés sur les GeForce (D2).
+- [Note d'application NVENC, SDK 13.1](https://docs.nvidia.com/video-technologies/video-codec-sdk/13.1/nvenc-application-note/index.html) (NVIDIA) : limite de 12 par ordinateur, toutes cartes confondues (D2).
+- [Forum NVIDIA](https://forums.developer.nvidia.com/t/how-to-increase-number-of-nvenc-concurrent-sessions/169367) : citations des notes des SDK 12.1 et 12.2, aujourd'hui retirées (5 puis 8 encodages, versions de pilote) (D2).
+- [Blog vMix](https://blog.vmix.com/?p=4331) (source tierce) : passage à 12 observé avec le pilote 591.44, sans annonce de NVIDIA (D2).
+- [Wiki nvidia-patch](https://github.com/keylase/nvidia-patch/wiki/Verify-NVENC-patch) (source tierce) : message de FFmpeg au-delà de la limite (D2).
+
+**Velopack**
+- [Velopack sous Windows](https://docs.velopack.io/packaging/operating-systems/windows) : remplacement du dossier du programme pendant une mise à jour (A8).
+- [Code d'application des mises à jour, version 1.2.161](https://github.com/velopack/velopack/blob/1.2.161/src/bins/src/commands/apply_windows_impl.rs) et [correctif du 2026-10-10](https://github.com/velopack/velopack/commit/afa30e56b05d434cf4c770f82cbd7ee7231c4ed7) : copie de secours effacée si le second temps échoue (A8).
