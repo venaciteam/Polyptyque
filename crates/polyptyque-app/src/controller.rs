@@ -9,7 +9,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -26,17 +26,17 @@ use polyptyque_core::hotkeys;
 use polyptyque_core::naming;
 use polyptyque_core::paths;
 use polyptyque_core::platform::{BrowserInstall, Platform, WindowInfo};
-#[cfg(not(windows))]
+use polyptyque_core::recovery::SessionRecord;
 use polyptyque_engine::remux;
 use polyptyque_engine::resolve::{self, PrepareEvent};
 use polyptyque_engine::{probe, MicrophonePlan, Session, SessionPlan, SourceState, SourceStatus, SourceSummary};
 use slint::{CloseRequestResponse, ComponentHandle, Image, Model, ModelRc, SharedString, Timer, TimerMode, VecModel};
 
-use crate::convert::{ConversionEvent, Converter};
+use crate::convert::{ConversionEvent, Converter, JobKind};
 use crate::format;
 use crate::preview::{self, PreviewManager, PreviewState};
 use crate::update;
-use crate::{AppWindow, Bridge, SceneItem, SourceCard, SourceItem, WindowItem};
+use crate::{AppWindow, Bridge, IncidentFile, SceneItem, SourceCard, SourceItem, WindowItem};
 
 const LAUNCH_WAIT: Duration = Duration::from_secs(30);
 const DISK_STOP_THRESHOLD: u64 = 1_000_000_000;
@@ -89,8 +89,11 @@ enum UpdateState {
 /// Suivi de la file de conversion MP4, pour l'affichage.
 #[derive(Default)]
 struct ConversionProgress {
-    /// Fichiers demandés depuis que la file était vide.
+    /// Fichiers demandés depuis que la file était vide, dont réparations.
     total: usize,
+    repairs: usize,
+    /// Le fichier en cours est une réparation.
+    repairing: bool,
     finished: usize,
     succeeded: usize,
     failures: Vec<String>,
@@ -146,6 +149,12 @@ pub struct App {
     conversion: RefCell<ConversionProgress>,
     /// Fenêtres perdues pendant l'enregistrement, par source.
     lost_windows: RefCell<HashMap<String, LostWindow>>,
+    /// Journal de l'enregistrement en cours, tel qu'écrit sur le disque.
+    session_record: RefCell<Option<SessionRecord>>,
+    /// Enregistrement interrompu trouvé au lancement, en attente d'une
+    /// décision (réparer, reprendre).
+    incident: RefCell<Option<Incident>>,
+    incident_files: Rc<VecModel<IncidentFile>>,
     /// Micros proposés dans les réglages : identifiant et nom.
     mic_choices: RefCell<Vec<(String, String)>>,
     /// Un problème de micro a déjà été signalé pendant cet enregistrement.
@@ -159,6 +168,23 @@ pub struct App {
     /// La fermeture de session Windows est surveillée.
     #[cfg(windows)]
     session_watch: Cell<bool>,
+}
+
+/// Enregistrement interrompu trouvé au lancement.
+struct Incident {
+    /// Scène à reprendre, si elle existe encore.
+    scene_id: Option<String>,
+    /// Fichiers interrompus, à réparer.
+    repair: Vec<PathBuf>,
+}
+
+/// État d'un fichier d'un enregistrement interrompu.
+enum FileReport {
+    Missing,
+    Empty,
+    Complete { seconds: f64, size: u64 },
+    NeedsRepair { size: u64 },
+    Unreadable(String),
 }
 
 /// Suivi d'une fenêtre perdue pendant l'enregistrement.
@@ -227,6 +253,9 @@ pub fn run(platform: Arc<dyn Platform>, paths: Paths, initial: Option<Config>) -
         converter: RefCell::new(None),
         conversion: RefCell::new(ConversionProgress::default()),
         lost_windows: RefCell::new(HashMap::new()),
+        session_record: RefCell::new(None),
+        incident: RefCell::new(None),
+        incident_files: Rc::new(VecModel::default()),
         mic_choices: RefCell::new(Vec::new()),
         mic_warned: Cell::new(false),
         update: RefCell::new(None),
@@ -245,10 +274,12 @@ pub fn run(platform: Arc<dyn Platform>, paths: Paths, initial: Option<Config>) -
     let bridge = ui.global::<Bridge>();
     bridge.set_version(env!("CARGO_PKG_VERSION").into());
     bridge.set_cards(ModelRc::from(app.cards.clone()));
+    bridge.set_incident_files(ModelRc::from(app.incident_files.clone()));
     bridge.set_can_browse(cfg!(windows));
     app.refresh_all();
     app.restart_previews();
     app.register_hotkeys();
+    app.check_interrupted_session();
     if let Some(message) = warning {
         app.toast(&message, 2);
     } else if let Some(version) = crate::UPDATED_TO.get() {
@@ -281,6 +312,7 @@ pub fn run(platform: Arc<dyn Platform>, paths: Paths, initial: Option<Config>) -
     // Fermeture par le système pendant un enregistrement : on finalise.
     if let Some(session) = app.session.borrow_mut().take() {
         session.stop();
+        app.clear_session_record();
     }
     // Une conversion interrompue efface son fichier partiel ; le MKV reste.
     let converter = app.converter.borrow_mut().take();
@@ -338,6 +370,12 @@ fn install_callbacks(ui: &AppWindow) {
     });
     b.on_restore_window(|id| {
         with_app(|a| a.restore_window(&id));
+    });
+    b.on_incident_repair(|| {
+        with_app(|a| a.incident_repair());
+    });
+    b.on_incident_resume(|| {
+        with_app(|a| a.incident_resume());
     });
     b.on_toggle_source(|id| {
         with_app(|a| a.toggle_source(&id));
@@ -762,7 +800,15 @@ impl App {
                 self.set_shutdown_block(true);
                 let microphone = config.settings.microphone.enabled;
                 self.with_bridge(|b| b.set_mic_recording(microphone));
+                let record = SessionRecord {
+                    date: date.clone(),
+                    time: time.clone(),
+                    scene_id: scene.id.clone(),
+                    scene_name: scene.name.clone(),
+                    files: session.outputs(),
+                };
                 *self.session.borrow_mut() = Some(session);
+                self.start_session_record(record);
                 let video = &config.settings.video;
                 let text = format!(
                     "{} · {}x{} · {} i/s · {} kb/s",
@@ -924,18 +970,25 @@ impl App {
         self.joining.borrow_mut().clear();
         self.set_busy("Arrêt : finalisation des fichiers…");
         let handle = thread::spawn(move || {
-            let (summaries, reason) = match catch_unwind(AssertUnwindSafe(move || session.stop())) {
-                Ok(summaries) => (summaries, reason),
-                Err(_) => (Vec::new(), Some("Erreur interne pendant l'arrêt (voir le journal).".to_string())),
+            let (summaries, reason, clean) = match catch_unwind(AssertUnwindSafe(move || session.stop())) {
+                Ok(summaries) => (summaries, reason, true),
+                Err(_) => (Vec::new(), Some("Erreur interne pendant l'arrêt (voir le journal).".to_string()), false),
             };
-            post(move |app| app.finish_stop(summaries, reason));
+            post(move |app| app.finish_stop(summaries, reason, clean));
         });
         *self.stop_thread.borrow_mut() = Some(handle);
     }
 
-    fn finish_stop(&self, summaries: Vec<SourceSummary>, reason: Option<String>) {
+    fn finish_stop(&self, summaries: Vec<SourceSummary>, reason: Option<String>, clean: bool) {
         if let Some(handle) = self.stop_thread.borrow_mut().take() {
             let _ = handle.join();
+        }
+        if clean {
+            self.clear_session_record();
+        } else {
+            // Fichiers peut-être mal fermés : le bilan sera proposé au
+            // prochain lancement.
+            self.session_record.borrow_mut().take();
         }
         self.set_shutdown_block(false);
         self.set_busy("");
@@ -982,7 +1035,7 @@ impl App {
     fn tick_status(&self) {
         self.update_preview_size();
         self.watch_session_end();
-        let statuses: Vec<SourceStatus> = {
+        let statuses: (Vec<SourceStatus>, Vec<PathBuf>) = {
             let mut session = self.session.borrow_mut();
             let Some(session) = session.as_mut() else {
                 self.refresh_disk(false);
@@ -993,8 +1046,10 @@ impl App {
             if let Some(micro) = session.microphone_status() {
                 self.show_microphone(&micro);
             }
-            session.status()
+            (session.status(), session.outputs())
         };
+        let (statuses, outputs) = statuses;
+        self.update_session_record(outputs);
         let joining = self.joining.borrow().clone();
         for status in &statuses {
             let Some(index) = (0..self.cards.row_count())
@@ -1104,6 +1159,141 @@ impl App {
                 }
                 Err(e) => log::warn!("[{}] réouverture automatique impossible : {e:#}", source.name),
             }
+        }
+    }
+
+    // ----- Reprise après incident ----------------------------------------
+
+    fn start_session_record(&self, record: SessionRecord) {
+        if let Err(e) = record.save(&paths::session_record_file()) {
+            log::warn!("journal de session : {e:#}");
+        }
+        *self.session_record.borrow_mut() = Some(record);
+    }
+
+    /// Tient à jour la liste des fichiers du journal de session (nouvelles
+    /// parties, sources ajoutées).
+    fn update_session_record(&self, files: Vec<PathBuf>) {
+        let mut record = self.session_record.borrow_mut();
+        let Some(record) = record.as_mut() else {
+            return;
+        };
+        if record.files != files {
+            record.files = files;
+            if let Err(e) = record.save(&paths::session_record_file()) {
+                log::warn!("journal de session : {e:#}");
+            }
+        }
+    }
+
+    /// Arrêt normal : plus rien à reprendre.
+    fn clear_session_record(&self) {
+        self.session_record.borrow_mut().take();
+        SessionRecord::clear(&paths::session_record_file());
+    }
+
+    /// Au lancement : si le journal de session existe encore, le précédent
+    /// enregistrement s'est mal terminé. Ses fichiers sont examinés hors du
+    /// fil de l'interface, puis le bilan est affiché.
+    fn check_interrupted_session(&self) {
+        let record = match SessionRecord::load(&paths::session_record_file()) {
+            Ok(None) => return,
+            Ok(Some(record)) => Some(record),
+            Err(e) => {
+                log::warn!("{e:#}");
+                None
+            }
+        };
+        log::warn!(
+            "enregistrement précédent interrompu ({})",
+            record.as_ref().map_or("journal illisible".to_string(), |r| format!("{} {}", r.date, r.time))
+        );
+        let platform = self.platform.clone();
+        thread::spawn(move || {
+            let files = record.as_ref().map(|r| r.files.clone()).unwrap_or_default();
+            let reports =
+                catch_unwind(AssertUnwindSafe(|| inspect_interrupted(platform.as_ref(), &files))).unwrap_or_default();
+            post(move |app| app.show_incident(record, reports));
+        });
+    }
+
+    fn show_incident(&self, record: Option<SessionRecord>, reports: Vec<(PathBuf, FileReport)>) {
+        if self.recording() || self.busy.get() {
+            // Un nouvel enregistrement a déjà commencé : son journal a remplacé
+            // l'ancien.
+            return;
+        }
+        for (path, report) in &reports {
+            log::info!("fichier de l'enregistrement interrompu : {} : {}", path.display(), report_text(report));
+        }
+        let scene_id = record
+            .as_ref()
+            .and_then(|r| self.config.borrow().scenes.iter().find(|s| s.id == r.scene_id).map(|s| s.id.clone()));
+        let repair: Vec<PathBuf> = reports
+            .iter()
+            .filter(|(_, report)| matches!(report, FileReport::NeedsRepair { .. }))
+            .map(|(path, _)| path.clone())
+            .collect();
+        let text = match &record {
+            Some(r) => format!(
+                "Polyptyque s'est fermé pendant l'enregistrement commencé le {} à {} (scène « {} »). {}",
+                display_date(&r.date),
+                r.time,
+                r.scene_name,
+                if reports.is_empty() { "Aucun fichier n'avait encore été écrit." } else { "État des fichiers :" }
+            ),
+            None => "Polyptyque s'est fermé pendant un enregistrement, mais son journal est illisible : vérifie les fichiers dans le dossier d'enregistrement.".to_string(),
+        };
+        let files: Vec<IncidentFile> = reports
+            .iter()
+            .map(|(path, report)| IncidentFile {
+                name: path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default().into(),
+                detail: report_text(report).into(),
+            })
+            .collect();
+        let can_resume = scene_id.is_some();
+        let can_repair = !repair.is_empty();
+        *self.incident.borrow_mut() = Some(Incident { scene_id, repair });
+        self.incident_files.set_vec(files);
+        self.with_bridge(|b| {
+            b.set_incident_text(text.into());
+            b.set_incident_can_repair(can_repair);
+            b.set_incident_can_resume(can_resume);
+            b.set_sheet("incident".into());
+        });
+    }
+
+    /// Met à jour l'état d'un fichier dans le bilan, s'il est affiché.
+    fn set_incident_detail(&self, path: &Path, detail: String) {
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        for i in 0..self.incident_files.row_count() {
+            if let Some(mut row) = self.incident_files.row_data(i) {
+                if row.name == name {
+                    row.detail = detail.as_str().into();
+                    self.incident_files.set_row_data(i, row);
+                }
+            }
+        }
+    }
+
+    fn incident_repair(&self) {
+        let files = self.incident.borrow_mut().as_mut().map(|i| std::mem::take(&mut i.repair)).unwrap_or_default();
+        if files.is_empty() {
+            return;
+        }
+        self.with_bridge(|b| b.set_incident_can_repair(false));
+        self.toast(&format!("Réparation de {} fichier(s) lancée.", files.len()), 1);
+        self.enqueue_jobs(files, JobKind::Repair);
+    }
+
+    fn incident_resume(&self) {
+        let scene_id = self.incident.borrow().as_ref().and_then(|i| i.scene_id.clone());
+        self.close_sheet();
+        if let Some(id) = scene_id {
+            if self.config.borrow().active_scene != id {
+                self.select_scene(&id);
+            }
+            self.start_recording(None);
         }
     }
 
@@ -1351,15 +1541,22 @@ impl App {
     }
 
     fn enqueue_conversions(&self, files: Vec<PathBuf>) {
+        self.enqueue_jobs(files, JobKind::Convert);
+    }
+
+    fn enqueue_jobs(&self, files: Vec<PathBuf>, kind: JobKind) {
         let converter = self.converter.borrow();
         let Some(converter) = converter.as_ref() else {
-            self.toast("La conversion MP4 n'est pas disponible (voir le journal).", 3);
+            self.toast("La conversion n'est pas disponible (voir le journal).", 3);
             return;
         };
         let mut progress = self.conversion.borrow_mut();
         for file in files {
             progress.total += 1;
-            converter.enqueue(file);
+            if kind == JobKind::Repair {
+                progress.repairs += 1;
+            }
+            converter.enqueue(file, kind);
         }
         let text = conversion_text(&progress, 0.0);
         drop(progress);
@@ -1371,8 +1568,12 @@ impl App {
 
     fn on_conversion(&self, event: ConversionEvent) {
         match event {
-            ConversionEvent::Started { input } => {
-                log::info!("conversion de {}", input.display());
+            ConversionEvent::Started { input, kind } => {
+                log::info!("traitement de {}", input.display());
+                self.conversion.borrow_mut().repairing = kind == JobKind::Repair;
+                if kind == JobKind::Repair {
+                    self.set_incident_detail(&input, "Réparation en cours…".into());
+                }
                 let text = conversion_text(&self.conversion.borrow(), 0.0);
                 self.with_bridge(|b| {
                     b.set_converting(true);
@@ -1388,6 +1589,13 @@ impl App {
                 });
             }
             ConversionEvent::Finished { input, result } => {
+                if self.conversion.borrow().repairing {
+                    let detail = match &result {
+                        Ok(_) => "Réparé : prêt pour le montage".to_string(),
+                        Err(e) => format!("Échec de la réparation : {e}"),
+                    };
+                    self.set_incident_detail(&input, detail);
+                }
                 let mut progress = self.conversion.borrow_mut();
                 progress.finished += 1;
                 match result {
@@ -1408,20 +1616,27 @@ impl App {
                 if matches!(*self.confirm.borrow(), Some(Confirm::CancelConversion | Confirm::QuitWhileConverting)) {
                     self.close_sheet();
                 }
+                let what = if progress.repairs == progress.total {
+                    "Réparation"
+                } else if progress.repairs == 0 {
+                    "Conversion MP4"
+                } else {
+                    "Conversion et réparation"
+                };
                 if progress.cancelled {
                     self.toast(
-                        &format!("Conversion MP4 annulée ({} fichier(s) convertis avant l'arrêt).", progress.succeeded),
+                        &format!("{what} annulée ({} fichier(s) traités avant l'arrêt).", progress.succeeded),
                         2,
                     );
                 } else if progress.failures.is_empty() {
                     self.toast(
-                        &format!("Conversion MP4 terminée : {} fichier(s) prêts pour le montage.", progress.succeeded),
+                        &format!("{what} terminée : {} fichier(s) prêts pour le montage.", progress.succeeded),
                         1,
                     );
                 } else {
                     self.toast(
                         &format!(
-                            "Conversion MP4 : {} réussie(s), {} échec(s). {}",
+                            "{what} : {} réussite(s), {} échec(s). {}",
                             progress.succeeded,
                             progress.failures.len(),
                             progress.failures.join(" · ")
@@ -1994,6 +2209,10 @@ impl App {
 
     fn close_sheet(&self) {
         self.confirm.borrow_mut().take();
+        if self.incident.borrow_mut().take().is_some() {
+            // Bilan d'un enregistrement interrompu vu : il n'est plus proposé.
+            SessionRecord::clear(&paths::session_record_file());
+        }
         self.with_bridge(|b| {
             b.set_sheet("".into());
             b.set_settings_error("".into());
@@ -2158,6 +2377,10 @@ impl App {
         if let Some(handle) = stopping {
             let _ = handle.join();
         }
+        if let Ok(mut record) = self.session_record.try_borrow_mut() {
+            record.take();
+            SessionRecord::clear(&paths::session_record_file());
+        }
         // Une conversion interrompue efface son fichier partiel.
         let converter = self.converter.try_borrow_mut().ok().and_then(|mut c| c.take());
         drop(converter);
@@ -2266,13 +2489,59 @@ fn same_file(a: &std::path::Path, b: &std::path::Path) -> bool {
     }
 }
 
-/// Texte de la pastille de conversion : « MP4 · 2 sur 3 · 45 % ».
+/// Texte de la pastille de conversion : « MP4 · 2 sur 3 · 45 % » (ou
+/// « Réparation · … »).
 fn conversion_text(progress: &ConversionProgress, value: f32) -> String {
     let current = (progress.finished + 1).min(progress.total.max(1));
     let percent = (value * 100.0).round() as u32;
+    let what = if progress.repairing { "Réparation" } else { "MP4" };
     if progress.total > 1 {
-        format!("MP4 · {current} sur {} · {percent} %", progress.total)
+        format!("{what} · {current} sur {} · {percent} %", progress.total)
     } else {
-        format!("MP4 · {percent} %")
+        format!("{what} · {percent} %")
+    }
+}
+
+/// Examine les fichiers d'un enregistrement interrompu.
+fn inspect_interrupted(platform: &dyn Platform, files: &[PathBuf]) -> Vec<(PathBuf, FileReport)> {
+    let ffmpeg = probe::locate_ffmpeg();
+    files
+        .iter()
+        .map(|path| {
+            let report = match fs::metadata(path) {
+                Err(_) => FileReport::Missing,
+                Ok(meta) if meta.len() == 0 => FileReport::Empty,
+                Ok(meta) => match &ffmpeg {
+                    None => FileReport::Unreadable("FFmpeg introuvable".into()),
+                    Some(ffmpeg) => match remux::inspect(platform, ffmpeg, path) {
+                        Ok(info) if remux::needs_repair(&info) => FileReport::NeedsRepair { size: meta.len() },
+                        Ok(info) => FileReport::Complete { seconds: info.duration.unwrap_or(0.0), size: meta.len() },
+                        Err(e) => FileReport::Unreadable(format!("{e:#}")),
+                    },
+                },
+            };
+            (path.clone(), report)
+        })
+        .collect()
+}
+
+fn report_text(report: &FileReport) -> String {
+    match report {
+        FileReport::Missing => "Introuvable : déplacé ou supprimé ?".into(),
+        FileReport::Empty => "Vide : rien n'avait été écrit".into(),
+        FileReport::Complete { seconds, size } => {
+            format!("Complet · {} · {}", format::clock(Duration::from_secs_f64(*seconds)), format::bytes(*size))
+        }
+        FileReport::NeedsRepair { size } => format!("Interrompu, lisible, à réparer · {}", format::bytes(*size)),
+        FileReport::Unreadable(e) => format!("Illisible : {e}"),
+    }
+}
+
+/// « 2026-10-21 » → « 21/10/2026 ».
+fn display_date(date: &str) -> String {
+    let parts: Vec<&str> = date.split('-').collect();
+    match parts.as_slice() {
+        [year, month, day] => format!("{day}/{month}/{year}"),
+        _ => date.to_string(),
     }
 }

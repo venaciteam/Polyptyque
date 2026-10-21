@@ -40,6 +40,12 @@ export struct SourceCard {
     busy: bool,
 }
 
+// Fichier d'un enregistrement interrompu, dans le bilan.
+export struct IncidentFile {
+    name: string,
+    detail: string,
+}
+
 export struct WindowItem {
     title: string,
     program: string,
@@ -160,6 +166,15 @@ export global Bridge {
     callback move-source(int);
     callback open-source(string);
     callback restore-window(string);
+
+    // Enregistrement interrompu (plantage, coupure de courant) : bilan au
+    // lancement suivant.
+    in property <string> incident-text;
+    in property <[IncidentFile]> incident-files;
+    in property <bool> incident-can-repair;
+    in property <bool> incident-can-resume;
+    callback incident-repair();
+    callback incident-resume();
     // Démarre ou arrête l'enregistrement d'une seule source.
     callback toggle-source(string);
     callback open-settings();

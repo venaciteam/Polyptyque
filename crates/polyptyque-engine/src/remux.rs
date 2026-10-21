@@ -18,6 +18,7 @@ use std::thread;
 use anyhow::{bail, Context, Result};
 use polyptyque_core::naming;
 use polyptyque_core::platform::Platform;
+use polyptyque_core::storage;
 
 /// Ce que FFmpeg annonce d'un fichier.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -61,9 +62,16 @@ pub fn inspect(platform: &dyn Platform, ffmpeg: &Path, path: &Path) -> Result<Me
     Ok(info)
 }
 
+/// Format d'un fichier remuxé.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Container {
+    Mp4,
+    Matroska,
+}
+
 /// Convertit `input` et renvoie le chemin du fichier créé. `on_progress`
-/// reçoit l'avancement (0 à 1) quand la durée est connue. Si `cancel`
-/// passe à vrai, la conversion s'arrête et le fichier partiel est effacé.
+/// reçoit l'avancement (0 à 1). Si `cancel` passe à vrai, la conversion
+/// s'arrête et le fichier partiel est effacé.
 pub fn convert(
     platform: &dyn Platform,
     ffmpeg: &Path,
@@ -74,10 +82,82 @@ pub fn convert(
     if !is_convertible(input) {
         bail!("seuls les fichiers .mkv et .mka peuvent être convertis");
     }
-    let source = inspect(platform, ffmpeg, input)?;
     let output = converted_path(input);
-    let args = remux_args(input, &output, source.video_codec.as_deref() == Some("hevc"));
     log::info!("conversion : {} -> {}", input.display(), output.display());
+    remux_file(platform, ffmpeg, input, &output, Container::Mp4, on_progress, cancel)
+        .inspect_err(|e| log::warn!("conversion de {} : {e:#}", input.display()))?;
+    log::info!("conversion réussie : {}", output.display());
+    Ok(output)
+}
+
+/// Un MKV interrompu brutalement (coupure de courant, écran bleu, FFmpeg
+/// arrêté de force) n'a ni durée ni index : il se lit, mais le déplacement
+/// y est lent et certains logiciels de montage le refusent.
+pub fn needs_repair(info: &MediaInfo) -> bool {
+    info.duration.is_none()
+}
+
+/// Répare un MKV (ou MKA) interrompu en le recopiant sans réencodage : la
+/// durée et l'index sont reconstruits. L'original n'est remplacé qu'une fois
+/// la copie vérifiée ; en cas d'échec, il reste intact.
+pub fn repair(
+    platform: &dyn Platform,
+    ffmpeg: &Path,
+    input: &Path,
+    on_progress: &mut dyn FnMut(f32),
+    cancel: &AtomicBool,
+) -> Result<PathBuf> {
+    if !is_convertible(input) {
+        bail!("seuls les fichiers .mkv et .mka peuvent être réparés");
+    }
+    log::info!("réparation : {}", input.display());
+    let repaired = storage::sibling(input, ".reparation");
+    let result = remux_file(platform, ffmpeg, input, &repaired, Container::Matroska, on_progress, cancel)
+        .and_then(|()| replace_with(input, &repaired));
+    match result {
+        Ok(()) => {
+            log::info!("réparation réussie : {}", input.display());
+            Ok(input.to_path_buf())
+        }
+        Err(e) => {
+            let _ = fs::remove_file(&repaired);
+            log::warn!("réparation de {} : {e:#}", input.display());
+            Err(e)
+        }
+    }
+}
+
+/// Remplace `original` par `replacement`, en remettant l'original en place
+/// si le second renommage échoue.
+fn replace_with(original: &Path, replacement: &Path) -> Result<()> {
+    let backup = storage::sibling(original, ".avant-reparation");
+    fs::rename(original, &backup).context("le fichier d'origine est utilisé par un autre programme")?;
+    if let Err(e) = fs::rename(replacement, original) {
+        let _ = fs::rename(&backup, original);
+        return Err(e).context("remplacement du fichier d'origine");
+    }
+    let _ = fs::remove_file(&backup);
+    Ok(())
+}
+
+/// Recopie `input` dans `output` sans réencodage, sous un nom temporaire
+/// renommé seulement après vérification : un fichier interrompu (plantage,
+/// annulation) ne passe jamais pour un fichier complet.
+fn remux_file(
+    platform: &dyn Platform,
+    ffmpeg: &Path,
+    input: &Path,
+    output: &Path,
+    container: Container,
+    on_progress: &mut dyn FnMut(f32),
+    cancel: &AtomicBool,
+) -> Result<()> {
+    let source = inspect(platform, ffmpeg, input)?;
+    let input_size = fs::metadata(input).map(|m| m.len()).unwrap_or(0);
+    let partial = storage::sibling(output, ".partiel");
+    // Reste d'une conversion interrompue : FFmpeg refuserait de l'écraser.
+    let _ = fs::remove_file(&partial);
+    let args = remux_args(input, &partial, container, source.video_codec.as_deref() == Some("hevc"));
 
     let mut command = Command::new(ffmpeg);
     command.args(&args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -103,10 +183,15 @@ pub fn convert(
                 let _ = child.kill();
                 break;
             }
-            if let (Some(seconds), Some(total)) = (parse_progress(&line), source.duration) {
-                if total > 0.0 {
-                    on_progress((seconds / total).clamp(0.0, 1.0) as f32);
-                }
+            // Avancement d'après la durée, ou d'après la taille écrite pour
+            // un fichier interrompu dont la durée est inconnue.
+            let fraction = match (source.duration, parse_progress(&line), parse_written(&line)) {
+                (Some(total), Some(seconds), _) if total > 0.0 => Some(seconds / total),
+                (None, _, Some(bytes)) if input_size > 0 => Some(bytes as f64 / input_size as f64),
+                _ => None,
+            };
+            if let Some(fraction) = fraction {
+                on_progress(fraction.clamp(0.0, 1.0) as f32);
             }
         }
     }
@@ -114,27 +199,23 @@ pub fn convert(
     let errors = stderr.and_then(|h| h.join().ok()).unwrap_or_default();
 
     let result = if cancelled || cancel.load(Ordering::Relaxed) {
-        Err(anyhow::anyhow!("conversion annulée"))
+        Err(anyhow::anyhow!("annulé"))
     } else if !status.success() {
-        Err(anyhow::anyhow!("échec de la conversion ({status}) : {}", last_line(&errors)))
+        Err(anyhow::anyhow!("échec de FFmpeg ({status}) : {}", last_line(&errors)))
     } else {
-        inspect(platform, ffmpeg, &output).and_then(|converted| verify(&source, &converted))
+        inspect(platform, ffmpeg, &partial)
+            .and_then(|copy| verify(&source, &copy))
+            .and_then(|()| fs::rename(&partial, output).context("renommage du fichier terminé"))
     };
-    match result {
-        Ok(()) => {
-            on_progress(1.0);
-            log::info!("conversion réussie : {}", output.display());
-            Ok(output)
-        }
-        Err(e) => {
-            let _ = fs::remove_file(&output);
-            log::warn!("conversion de {} : {e:#}", input.display());
-            Err(e)
-        }
+    if result.is_err() {
+        let _ = fs::remove_file(&partial);
+    } else {
+        on_progress(1.0);
     }
+    result
 }
 
-fn remux_args(input: &Path, output: &Path, hevc: bool) -> Vec<String> {
+fn remux_args(input: &Path, output: &Path, container: Container, hevc: bool) -> Vec<String> {
     let mut args: Vec<String> =
         ["-hide_banner", "-nostdin", "-loglevel", "error", "-nostats", "-progress", "pipe:1", "-i"]
             .iter()
@@ -142,11 +223,16 @@ fn remux_args(input: &Path, output: &Path, hevc: bool) -> Vec<String> {
             .collect();
     args.push(input.to_string_lossy().into_owned());
     args.extend(["-map", "0", "-c", "copy"].iter().map(|s| s.to_string()));
-    if hevc {
-        // Étiquette attendue par la plupart des logiciels pour le HEVC en MP4.
-        args.extend(["-tag:v".to_string(), "hvc1".to_string()]);
+    match container {
+        Container::Mp4 => {
+            if hevc {
+                // Étiquette attendue par la plupart des logiciels pour le HEVC en MP4.
+                args.extend(["-tag:v".to_string(), "hvc1".to_string()]);
+            }
+            args.extend(["-f".to_string(), "mp4".to_string()]);
+        }
+        Container::Matroska => args.extend(["-f".to_string(), "matroska".to_string()]),
     }
-    args.extend(["-f".to_string(), "mp4".to_string()]);
     args.push(output.to_string_lossy().into_owned());
     args
 }
@@ -211,6 +297,11 @@ fn parse_progress(line: &str) -> Option<f64> {
     value.trim().parse::<i64>().ok().filter(|&us| us >= 0).map(|us| us as f64 / 1_000_000.0)
 }
 
+/// Octets déjà écrits, d'après une ligne de `-progress`.
+fn parse_written(line: &str) -> Option<u64> {
+    line.strip_prefix("total_size=")?.trim().parse().ok()
+}
+
 fn extension(path: &Path) -> Option<String> {
     path.extension().map(|e| e.to_string_lossy().to_lowercase())
 }
@@ -254,6 +345,8 @@ At least one output file must be specified";
         assert_eq!(parse_progress("out_time_ms=1000000"), Some(1.0));
         assert_eq!(parse_progress("out_time_us=N/A"), None);
         assert_eq!(parse_progress("progress=continue"), None);
+        assert_eq!(parse_written("total_size=1234"), Some(1234));
+        assert_eq!(parse_written("total_size=N/A"), None);
     }
 
     #[test]
@@ -282,9 +375,11 @@ At least one output file must be specified";
 
     #[test]
     fn hevc_gets_compatible_tag() {
-        let args = remux_args(Path::new("a.mkv"), Path::new("a.mp4"), true).join(" ");
+        let args = remux_args(Path::new("a.mkv"), Path::new("a.mp4"), Container::Mp4, true).join(" ");
         assert!(args.contains("-map 0 -c copy -tag:v hvc1 -f mp4 a.mp4"));
-        let args = remux_args(Path::new("a.mkv"), Path::new("a.mp4"), false).join(" ");
+        let args = remux_args(Path::new("a.mkv"), Path::new("a.mp4"), Container::Mp4, false).join(" ");
         assert!(!args.contains("hvc1"));
+        let args = remux_args(Path::new("a.mkv"), Path::new("b.mkv"), Container::Matroska, true).join(" ");
+        assert!(args.ends_with("-map 0 -c copy -f matroska b.mkv"));
     }
 }

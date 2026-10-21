@@ -320,6 +320,30 @@ fn crashed_encoder_resumes_in_a_new_part() {
     let witness = &summaries[1];
     assert_eq!(witness.outputs.len(), 1);
     assert!((check_parts(&witness.name, &witness.outputs) - elapsed).abs() < 0.25);
+
+    // La première partie, coupée net, n'a ni durée ni index : la réparation
+    // les reconstruit sans rien perdre, et remplace le fichier sur place.
+    let sim_platform = SimPlatform { start: Instant::now(), pipes_dir: root.clone() };
+    let ffmpeg = Path::new("ffmpeg");
+    let cut = &crashed.outputs[0];
+    let before = measure(cut);
+    assert!(remux::needs_repair(&remux::inspect(&sim_platform, ffmpeg, cut).unwrap()));
+    let mut progress = Vec::new();
+    let repaired = remux::repair(&sim_platform, ffmpeg, cut, &mut |p| progress.push(p), &AtomicBool::new(false))
+        .expect("réparation");
+    assert_eq!(&repaired, cut);
+    let info = remux::inspect(&sim_platform, ffmpeg, cut).unwrap();
+    assert!(!remux::needs_repair(&info), "{info:?}");
+    assert_eq!(progress.last(), Some(&1.0));
+    let after = measure(cut);
+    assert!((after.0 - before.0).abs() < 0.05 && (after.1 - before.1).abs() < 0.05, "{before:?} -> {after:?}");
+    let leftovers: Vec<_> = fs::read_dir(cut.parent().unwrap())
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.contains(".reparation") || n.contains(".avant-reparation") || n.contains(".partiel"))
+        .collect();
+    assert!(leftovers.is_empty(), "{leftovers:?}");
     fs::remove_dir_all(root).unwrap();
 }
 

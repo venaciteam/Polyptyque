@@ -10,9 +10,10 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::browsers::program_name;
-use crate::naming::DEFAULT_TEMPLATE;
+use crate::naming::{self, DEFAULT_TEMPLATE};
 use crate::paths;
 use crate::platform::WindowInfo;
+use crate::storage;
 
 pub const CONFIG_VERSION: u32 = 1;
 
@@ -43,47 +44,49 @@ impl Default for Config {
 }
 
 impl Config {
-    /// Charge la configuration. En cas de fichier absent, renvoie la
-    /// configuration par défaut ; en cas de fichier illisible, en garde une
-    /// copie et renvoie un avertissement.
+    /// Charge la configuration. Fichier absent : configuration par défaut.
+    /// Fichier abîmé ou vide (coupure de courant, disque) : une copie en est
+    /// gardée, puis la sauvegarde la plus récente encore valide est
+    /// restaurée ; à défaut, configuration par défaut. Le message éventuel
+    /// est à montrer à l'utilisateur.
     pub fn load_or_default(path: &Path) -> (Config, Option<String>) {
-        let text = match fs::read_to_string(path) {
-            Ok(text) => text,
+        let problem = match fs::read_to_string(path) {
+            Ok(text) => match parse(&text) {
+                Ok(config) => return (config, None),
+                Err(e) => {
+                    let damaged = storage::sibling(path, ".invalide");
+                    let _ = fs::copy(path, &damaged);
+                    format!("Réglages abîmés ({e:#}). Une copie a été gardée dans {}.", damaged.display())
+                }
+            },
             Err(e) if e.kind() == ErrorKind::NotFound => return (Config::default(), None),
-            Err(e) => {
-                return (
-                    Config::default(),
-                    Some(format!("Configuration illisible ({e}), réglages par défaut utilisés.")),
-                )
-            }
+            Err(e) => format!("Réglages illisibles ({e})."),
         };
-        match toml::from_str::<Config>(&text) {
-            Ok(mut config) => {
-                config.normalize();
-                (config, None)
-            }
-            Err(e) => {
-                let backup = path.with_extension("toml.invalide");
-                let _ = fs::copy(path, &backup);
-                (
-                    Config::default(),
-                    Some(format!("Configuration invalide ({e}). Une copie a été gardée dans {}.", backup.display())),
-                )
-            }
+        for backup in backups(path) {
+            let Ok(config) = fs::read_to_string(&backup).map_err(anyhow::Error::from).and_then(|t| parse(&t)) else {
+                continue;
+            };
+            let name = backup.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let _ = config.save(path);
+            return (config, Some(format!("{problem} La sauvegarde « {name} » a été restaurée.")));
         }
+        (Config::default(), Some(format!("{problem} Aucune sauvegarde valide : réglages par défaut.")))
     }
 
-    /// Enregistre la configuration de façon atomique (fichier temporaire puis
-    /// renommage), pour ne jamais laisser un fichier à moitié écrit.
+    /// Enregistre la configuration sans jamais laisser un fichier à moitié
+    /// écrit. La version précédente est gardée (`config.toml.precedent`),
+    /// ainsi qu'une copie par jour dans `sauvegardes` (les cinq derniers
+    /// jours).
     pub fn save(&self, path: &Path) -> Result<()> {
-        if let Some(dir) = path.parent() {
-            fs::create_dir_all(dir).with_context(|| format!("création du dossier {}", dir.display()))?;
-        }
         let text = toml::to_string_pretty(self).context("sérialisation de la configuration")?;
-        let tmp = path.with_extension("toml.tmp");
-        fs::write(&tmp, text).with_context(|| format!("écriture de {}", tmp.display()))?;
-        fs::rename(&tmp, path).with_context(|| format!("remplacement de {}", path.display()))?;
-        Ok(())
+        if let Ok(current) = fs::read_to_string(path) {
+            // Une version abîmée ne remplace jamais une bonne sauvegarde.
+            if parse(&current).is_ok() && current != text {
+                let _ = storage::write_atomic(&storage::sibling(path, ".precedent"), current.as_bytes());
+                backup_daily(path, &current);
+            }
+        }
+        storage::write_atomic(path, text.as_bytes())
     }
 
     /// Garantit les invariants : au moins une scène, une scène active valide,
@@ -109,6 +112,57 @@ impl Config {
     pub fn active_scene_mut(&mut self) -> &mut Scene {
         let index = self.scenes.iter().position(|s| s.id == self.active_scene).unwrap_or(0);
         &mut self.scenes[index]
+    }
+}
+
+/// Jours de sauvegarde quotidienne des réglages conservés.
+const BACKUP_DAYS: usize = 5;
+
+fn parse(text: &str) -> Result<Config> {
+    // Un fichier vide serait lu comme une configuration par défaut : toutes
+    // les scènes disparaîtraient sans un mot.
+    if text.trim().is_empty() {
+        anyhow::bail!("fichier vide");
+    }
+    let mut config: Config = toml::from_str(text)?;
+    config.normalize();
+    Ok(config)
+}
+
+fn backup_dir(path: &Path) -> PathBuf {
+    path.parent().unwrap_or(Path::new(".")).join("sauvegardes")
+}
+
+/// Sauvegardes possibles, de la plus récente à la plus ancienne.
+fn backups(path: &Path) -> Vec<PathBuf> {
+    let mut daily: Vec<PathBuf> = fs::read_dir(backup_dir(path))
+        .map(|entries| entries.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| is_daily_backup(p)).collect())
+        .unwrap_or_default();
+    daily.sort();
+    daily.reverse();
+    std::iter::once(storage::sibling(path, ".precedent")).chain(daily).collect()
+}
+
+fn is_daily_backup(path: &Path) -> bool {
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    name.starts_with("config_") && name.ends_with(".toml")
+}
+
+/// Garde une copie par jour (la première version du jour), et efface les
+/// plus anciennes.
+fn backup_daily(path: &Path, text: &str) {
+    let dir = backup_dir(path);
+    let (date, _) = naming::now_parts();
+    let today = dir.join(format!("config_{date}.toml"));
+    if today.exists() {
+        return;
+    }
+    if storage::write_atomic(&today, text.as_bytes()).is_err() {
+        return;
+    }
+    let mut daily: Vec<PathBuf> = backups(path).into_iter().skip(1).collect();
+    for old in daily.drain(BACKUP_DAYS.min(daily.len())..) {
+        let _ = fs::remove_file(old);
     }
 }
 
@@ -481,7 +535,48 @@ mod tests {
         let (loaded, warning) = Config::load_or_default(&path);
         assert!(warning.is_some());
         assert_eq!(loaded.scenes.len(), 1);
-        assert!(path.with_extension("toml.invalide").exists());
+        assert!(dir.join("config.toml.invalide").exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn damaged_file_is_restored_from_backup() {
+        let dir = std::env::temp_dir().join(format!("polyptyque-test-{}", new_id()));
+        let path = dir.join("config.toml");
+        let mut config = sample();
+        config.save(&path).unwrap();
+        config.active_scene_mut().name = "Modifiée".into();
+        config.save(&path).unwrap();
+        assert!(dir.join("config.toml.precedent").exists());
+        assert_eq!(fs::read_dir(dir.join("sauvegardes")).unwrap().count(), 1);
+        // Coupure de courant : fichier vide.
+        fs::write(&path, "").unwrap();
+        let (loaded, warning) = Config::load_or_default(&path);
+        assert!(warning.unwrap().contains("restaurée"));
+        assert_eq!(loaded.active_scene().sources.len(), 2);
+        // Le fichier restauré est réécrit.
+        assert!(!fs::read_to_string(&path).unwrap().trim().is_empty());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn daily_backups_are_pruned() {
+        let dir = std::env::temp_dir().join(format!("polyptyque-test-{}", new_id()));
+        let backups = dir.join("sauvegardes");
+        fs::create_dir_all(&backups).unwrap();
+        for day in 1..=8 {
+            fs::write(backups.join(format!("config_2020-01-0{day}.toml")), "x").unwrap();
+        }
+        let path = dir.join("config.toml");
+        let mut config = sample();
+        config.save(&path).unwrap();
+        config.active_scene_mut().name = "Modifiée".into();
+        config.save(&path).unwrap();
+        let mut names: Vec<String> =
+            fs::read_dir(&backups).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        names.sort();
+        assert_eq!(names.len(), BACKUP_DAYS);
+        assert_eq!(names[0], "config_2020-01-05.toml");
         fs::remove_dir_all(dir).unwrap();
     }
 

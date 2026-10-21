@@ -1,6 +1,6 @@
-//! File de conversion MKV → MP4, traitée un fichier à la fois sur un fil
-//! dédié : l'interface reste libre, et un enregistrement peut démarrer
-//! pendant une conversion.
+//! File de conversion MKV → MP4 et de réparation des MKV interrompus,
+//! traitée un fichier à la fois sur un fil dédié : l'interface reste libre,
+//! et un enregistrement peut démarrer pendant une conversion.
 
 use std::cell::Cell;
 use std::fs;
@@ -19,9 +19,19 @@ use polyptyque_engine::{probe, remux};
 const DISK_MARGIN: u64 = 1_000_000_000;
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(250);
 
+/// Ce qu'il faut faire d'un fichier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JobKind {
+    /// Copie MP4 (ou M4A) à côté du MKV.
+    Convert,
+    /// Reconstruction de la durée et de l'index d'un MKV interrompu, sur place.
+    Repair,
+}
+
 pub enum ConversionEvent {
     Started {
         input: PathBuf,
+        kind: JobKind,
     },
     Progress(f32),
     Finished {
@@ -33,7 +43,7 @@ pub enum ConversionEvent {
 }
 
 pub struct Converter {
-    jobs: Option<Sender<(u64, PathBuf)>>,
+    jobs: Option<Sender<(u64, PathBuf, JobKind)>>,
     /// Numéro du dernier fichier demandé.
     last_job: Cell<u64>,
     control: Arc<CancelControl>,
@@ -80,11 +90,11 @@ impl Converter {
         Self { jobs: Some(jobs), last_job: Cell::new(0), control, worker }
     }
 
-    pub fn enqueue(&self, file: PathBuf) {
+    pub fn enqueue(&self, file: PathBuf, kind: JobKind) {
         if let Some(jobs) = &self.jobs {
             let job = self.last_job.get() + 1;
             self.last_job.set(job);
-            let _ = jobs.send((job, file));
+            let _ = jobs.send((job, file, kind));
         }
     }
 
@@ -108,17 +118,17 @@ impl Drop for Converter {
 
 fn run(
     platform: Arc<dyn Platform>,
-    queue: Receiver<(u64, PathBuf)>,
+    queue: Receiver<(u64, PathBuf, JobKind)>,
     control: Arc<CancelControl>,
     on_event: impl Fn(ConversionEvent),
 ) {
     while let Ok(first) = queue.recv() {
         let mut next = Some(first);
-        while let Some((job, input)) = next {
+        while let Some((job, input, kind)) = next {
             if control.begin(job) {
-                on_event(ConversionEvent::Started { input: input.clone() });
-                let result =
-                    convert_one(platform.as_ref(), &input, &control.current, &on_event).map_err(|e| format!("{e:#}"));
+                on_event(ConversionEvent::Started { input: input.clone(), kind });
+                let result = convert_one(platform.as_ref(), &input, kind, &control.current, &on_event)
+                    .map_err(|e| format!("{e:#}"));
                 on_event(ConversionEvent::Finished { input, result });
             }
             next = queue.try_recv().ok();
@@ -134,6 +144,7 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 fn convert_one(
     platform: &dyn Platform,
     input: &Path,
+    kind: JobKind,
     cancel: &AtomicBool,
     on_event: &dyn Fn(ConversionEvent),
 ) -> Result<PathBuf> {
@@ -143,20 +154,18 @@ fn convert_one(
     let dir = input.parent().unwrap_or(Path::new("."));
     if let Some(free) = platform.free_disk_space(dir) {
         if free < size.saturating_add(DISK_MARGIN) {
-            bail!("espace disque insuffisant pour la copie MP4");
+            bail!("espace disque insuffisant pour la copie");
         }
     }
     let mut last = Instant::now() - PROGRESS_INTERVAL;
-    remux::convert(
-        platform,
-        &ffmpeg,
-        input,
-        &mut |progress| {
-            if last.elapsed() >= PROGRESS_INTERVAL || progress >= 1.0 {
-                last = Instant::now();
-                on_event(ConversionEvent::Progress(progress));
-            }
-        },
-        cancel,
-    )
+    let mut progress = |progress: f32| {
+        if last.elapsed() >= PROGRESS_INTERVAL || progress >= 1.0 {
+            last = Instant::now();
+            on_event(ConversionEvent::Progress(progress));
+        }
+    };
+    match kind {
+        JobKind::Convert => remux::convert(platform, &ffmpeg, input, &mut progress, cancel),
+        JobKind::Repair => remux::repair(platform, &ffmpeg, input, &mut progress, cancel),
+    }
 }

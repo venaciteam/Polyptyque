@@ -285,6 +285,15 @@ impl Session {
             .collect()
     }
 
+    /// Tous les fichiers de la session, dans l'ordre de démarrage des
+    /// sources (parties, sources arrêtées en cours de route et micro compris).
+    pub fn outputs(&self) -> Vec<PathBuf> {
+        let mut all: Vec<&SourceRuntime> =
+            self.sources.iter().chain(self.retired.iter()).chain(self.microphone.iter()).collect();
+        all.sort_by_key(|s| s.order);
+        all.into_iter().flat_map(|s| s.shared.outputs()).collect()
+    }
+
     /// Nombre de sources en train d'enregistrer.
     pub fn recording_count(&self) -> usize {
         self.sources.iter().filter(|s| s.recording()).count()
@@ -360,7 +369,16 @@ impl Session {
             output_thread: None,
             finisher: None,
         };
-        match thread::Builder::new().name(format!("{name}-encodage")).spawn(move || output_task.run()) {
+        let output_shared = shared.clone();
+        let output_name = name.to_string();
+        let encode = move || {
+            // L'écriture ne se relance pas d'elle-même : une erreur interne
+            // arrête la source, visiblement, sans toucher aux autres.
+            if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| output_task.run())).is_err() {
+                output_shared.fail(format!("[{output_name}] erreur interne de l'encodage (voir le journal)"));
+            }
+        };
+        match thread::Builder::new().name(format!("{name}-encodage")).spawn(encode) {
             Ok(handle) => runtime.output_thread = Some(handle),
             Err(e) => shared.fail(format!("fil d'encodage : {e}")),
         }

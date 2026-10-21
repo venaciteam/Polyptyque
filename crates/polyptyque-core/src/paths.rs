@@ -27,6 +27,11 @@ pub fn logs_dir() -> PathBuf {
     local_data_dir().join("journaux")
 }
 
+/// Journal de l'enregistrement en cours (voir `recovery`).
+pub fn session_record_file() -> PathBuf {
+    local_data_dir().join("session-en-cours.toml")
+}
+
 pub fn default_output_dir() -> PathBuf {
     UserDirs::new()
         .and_then(|u| u.video_dir().map(|p| p.join(APP_DIR)))

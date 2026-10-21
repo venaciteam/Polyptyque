@@ -13,5 +13,7 @@ pub mod hotkeys;
 pub mod naming;
 pub mod paths;
 pub mod platform;
+pub mod recovery;
+pub mod storage;
 pub mod timeline;
 pub mod video;

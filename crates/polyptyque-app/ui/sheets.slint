@@ -211,6 +211,61 @@ export component ConfirmSheet inherits Sheet {
     }
 }
 
+// Bilan d'un enregistrement interrompu, au lancement suivant.
+export component IncidentSheet inherits Sheet {
+    title: "Enregistrement interrompu";
+    sheet-width: 640px;
+    close => {
+        Bridge.close-sheet();
+    }
+
+    Text {
+        text: Bridge.incident-text;
+        color: Theme.text-muted;
+        wrap: word-wrap;
+    }
+    if Bridge.incident-files.length > 0: Rectangle {
+        height: min(Bridge.incident-files.length * 38px + 8px, 236px);
+        background: Theme.surface-raised;
+        border-radius: Theme.radius-small;
+        border-width: 1px;
+        border-color: Theme.border;
+        ListView {
+            for file in Bridge.incident-files: ListRow {
+                text: file.name;
+                detail: file.detail;
+                enabled: false;
+            }
+        }
+    }
+    if Bridge.incident-can-repair: Note {
+        tone: 2;
+        text: "« Réparer » recopie les fichiers interrompus sans réencodage pour reconstruire leur durée et leur index. Chaque original n'est remplacé qu'une fois sa copie vérifiée.";
+    }
+    Footer {
+        ActionButton {
+            text: "Fermer";
+            kind: "ghost";
+            clicked => {
+                Bridge.close-sheet();
+            }
+        }
+        if Bridge.incident-can-repair: ActionButton {
+            text: "Réparer les fichiers";
+            clicked => {
+                Bridge.incident-repair();
+            }
+        }
+        if Bridge.incident-can-resume: ActionButton {
+            text: "Reprendre l'enregistrement";
+            kind: "primary";
+            clicked => {
+                Bridge.incident-resume();
+            }
+        }
+    }
+}
+
 export component SettingsSheet inherits Sheet {
     title: "Réglages";
     sheet-width: 780px;
