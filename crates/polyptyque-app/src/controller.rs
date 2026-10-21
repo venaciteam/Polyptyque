@@ -227,10 +227,18 @@ pub struct Paths {
 
 pub fn run(platform: Arc<dyn Platform>, paths: Paths, initial: Option<Config>) -> Result<()> {
     let ui = AppWindow::new().context("création de la fenêtre")?;
-    let (config, warning) = match initial {
+    let (mut config, warning) = match initial {
         Some(config) => (config, None),
         None => Config::load_or_default(&paths.config),
     };
+    // Version portable déplacée, autre PC : profils et navigateurs retrouvés.
+    let browsers = if config.has_missing_browser() { platform.detect_browsers() } else { Vec::new() };
+    if config.relocate(&paths.profiles, &browsers) {
+        log::info!("profils de navigateur ou navigateurs retrouvés à leur nouvel emplacement");
+        if let Err(e) = config.save(&paths.config) {
+            log::warn!("enregistrement de la configuration : {e:#}");
+        }
+    }
     let app = Rc::new(App {
         ui: ui.as_weak(),
         platform,
@@ -276,7 +284,12 @@ pub fn run(platform: Arc<dyn Platform>, paths: Paths, initial: Option<Config>) -
 
     install_callbacks(&ui);
     let bridge = ui.global::<Bridge>();
-    bridge.set_version(env!("CARGO_PKG_VERSION").into());
+    // Version portable : on le signale, avec l'emplacement de ses données.
+    let version = match paths::portable_root() {
+        Some(_) => format!("{} · portable", env!("CARGO_PKG_VERSION")),
+        None => env!("CARGO_PKG_VERSION").to_string(),
+    };
+    bridge.set_version(version.into());
     bridge.set_cards(ModelRc::from(app.cards.clone()));
     bridge.set_incident_files(ModelRc::from(app.incident_files.clone()));
     bridge.set_can_browse(cfg!(windows));

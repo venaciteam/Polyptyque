@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::browsers::program_name;
 use crate::naming::{self, DEFAULT_TEMPLATE};
 use crate::paths;
-use crate::platform::WindowInfo;
+use crate::platform::{BrowserInstall, WindowInfo};
 use crate::storage;
 
 pub const CONFIG_VERSION: u32 = 1;
@@ -103,6 +103,46 @@ impl Config {
         if self.settings.filename_template.trim().is_empty() {
             self.settings.filename_template = DEFAULT_TEMPLATE.to_string();
         }
+    }
+
+    /// Vrai si le navigateur d'une source n'est plus à l'emplacement
+    /// enregistré (autre PC, navigateur réinstallé ailleurs).
+    pub fn has_missing_browser(&self) -> bool {
+        self.scenes.iter().flat_map(|s| &s.sources).any(|source| match &source.kind {
+            SourceKind::Browser { browser, .. } => !browser.exe_path.exists(),
+            SourceKind::Application { .. } => false,
+        })
+    }
+
+    /// Après un changement de PC ou de dossier (version portable) : chaque
+    /// profil de navigateur est cherché dans le dossier de profils actuel,
+    /// et un navigateur introuvable est remplacé par le même navigateur
+    /// installé ailleurs. Renvoie vrai si quelque chose a changé.
+    pub fn relocate(&mut self, profiles_root: &Path, browsers: &[BrowserInstall]) -> bool {
+        let mut changed = false;
+        for source in self.scenes.iter_mut().flat_map(|s| s.sources.iter_mut()) {
+            let SourceKind::Browser { profile_dir, browser, .. } = &mut source.kind else {
+                continue;
+            };
+            // Profil créé par Polyptyque : son dossier porte l'identifiant de
+            // la source.
+            let here = profiles_root.join(&source.id);
+            let ours = profile_dir.file_name().is_some_and(|n| n.to_string_lossy() == source.id);
+            if ours && *profile_dir != here && (here.exists() || !profile_dir.exists()) {
+                *profile_dir = here;
+                changed = true;
+            }
+            if !browser.exe_path.exists() {
+                let found = browsers
+                    .iter()
+                    .find(|b| b.name == browser.name && b.family == browser.family && b.exe_path != browser.exe_path);
+                if let Some(found) = found {
+                    browser.exe_path = found.exe_path.clone();
+                    changed = true;
+                }
+            }
+        }
+        changed
     }
 
     pub fn active_scene(&self) -> &Scene {
@@ -578,6 +618,33 @@ mod tests {
         assert_eq!(names.len(), BACKUP_DAYS);
         assert_eq!(names[0], "config_2020-01-05.toml");
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn profiles_and_browsers_follow_the_portable_folder() {
+        let old_root = Path::new("/ancien-pc/Polyptyque/données/profils");
+        let dir = std::env::temp_dir().join(format!("polyptyque-test-{}", new_id()));
+        let firefox =
+            BrowserRef { name: "Firefox".into(), exe_path: dir.join("absent.exe"), family: BrowserFamily::Gecko };
+        let mut config = Config::default();
+        let source = Source::browser("Concert", firefox, None, old_root);
+        let id = source.id.clone();
+        config.active_scene_mut().sources.push(source);
+        assert!(config.has_missing_browser());
+        let installed = vec![BrowserInstall {
+            name: "Firefox".into(),
+            exe_path: PathBuf::from("C:/Program Files/Mozilla Firefox/firefox.exe"),
+            family: BrowserFamily::Gecko,
+        }];
+        let profiles = dir.join("profils");
+        assert!(config.relocate(&profiles, &installed));
+        let SourceKind::Browser { profile_dir, browser, .. } = &config.active_scene().sources[0].kind else {
+            panic!("source navigateur attendue");
+        };
+        assert_eq!(profile_dir, &profiles.join(&id));
+        assert_eq!(browser.exe_path, installed[0].exe_path);
+        // Une seconde fois : rien à changer.
+        assert!(!config.relocate(&profiles, &installed));
     }
 
     #[test]

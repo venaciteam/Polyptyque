@@ -411,7 +411,7 @@ export component SettingsSheet inherits Sheet {
                 }
             }
             Toggle {
-                text: "Rechercher les mises à jour au démarrage";
+                text: "Rechercher les mises à jour (au démarrage, puis toutes les 6 h)";
                 checked: Bridge.settings-check-updates;
                 toggled(value) => {
                     Bridge.settings-check-updates = value;

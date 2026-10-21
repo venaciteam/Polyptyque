@@ -36,6 +36,9 @@ fn main() {
         .run();
     let log = init_logging();
     log::info!("Polyptyque {} (interface graphique)", env!("CARGO_PKG_VERSION"));
+    if let Some(root) = paths::portable_root() {
+        log::info!("version portable : données dans {}", root.join(paths::PORTABLE_DATA_DIR).display());
+    }
     if let Err(e) = launch() {
         log::error!("{e:#}");
         show_fatal(&format!("{e:#}\n\nJournal : {}", log.map(|p| p.display().to_string()).unwrap_or_default()));
