@@ -15,7 +15,8 @@ réglages et connexions des navigateurs.
 Version portable
 ----------------
 Polyptyque-portable.zip s'utilise sans installation : le décompresser où
-l'on veut (disque, clé USB), puis lancer polyptyque.exe. Scènes, réglages,
+l'on veut (disque, clé USB), puis lancer Polyptyque.exe à la racine du
+dossier (pas Update.exe). Scènes, réglages,
 connexions des navigateurs et journaux sont rangés dans le sous-dossier
 « données » : déplacer le dossier, ou le copier sur un autre PC, emporte
 tout. Les enregistrements vont dans le dossier choisi dans les réglages
