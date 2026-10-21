@@ -323,6 +323,18 @@ Inspirée d'[[OBS Studio]], volontairement allégée, thème sombre.
 - Langue : français au départ, textes externalisés pour permettre la traduction (public visé : grand public).
 - Accessibilité : navigation complète au clavier, compatibilité lecteur d'écran selon la technologie d'interface retenue.
 
+> [!todo] Pas encore réalisé (constat du 2026-10-22)
+> Comparaison de ce cahier avec le code, pour ne rien oublier :
+> - duplication d'une scène ;
+> - cadence réelle et durée sur chaque carte ; charge du processeur et de la carte graphique dans la barre d'état ;
+> - fenêtre de paramètres en sections (aujourd'hui : une feuille en deux colonnes « Enregistrement » et « Fichiers et interface ») ;
+> - textes externalisés pour la traduction ; navigation complète au clavier ;
+> - réglages d'encodage : résolution et cadence personnalisées depuis l'interface, contrôle du débit (débit constant imposé aujourd'hui), préréglage, choix d'un encodeur précis, codecs proposés selon le matériel ;
+> - découpage automatique (toutes les N heures ou N Go) ;
+> - alertes de disque par paliers et avertissement avant le démarrage ;
+> - test de capacité d'encodage au démarrage (aujourd'hui : l'encodeur est seulement essayé) ;
+> - modification d'une source après sa création (relance, curseur, arguments de lancement).
+
 ### Raccourcis clavier
 
 - **Globaux** : actifs même quand Polyptyque est en arrière-plan.

@@ -173,7 +173,8 @@ Chaque scénario porte un identifiant (A1, B3…) repris dans le plan d'action.
 > - [ ] Arrêt d'urgence par raccourci, même si l'interface est figée (A3).
 > - [ ] Profil de navigateur disparu signalé (C3) ; navigateur déplacé retrouvé (C4).
 > - [ ] Annulation d'une suppression (E2).
-> - [ ] Avertissement pour un dossier sur disque amovible ou réseau (D6) ; message dédié si FFmpeg disparaît (D7).
+> - [ ] Avertissement pour un dossier sur disque amovible ou réseau (D6).
+> - [x] Message dédié si FFmpeg disparaît (D7).
 > - [ ] Test de capacité au démarrage (E7) ; durée maximale facultative (E8).
 
 ---
