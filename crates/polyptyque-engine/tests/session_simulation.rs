@@ -379,6 +379,37 @@ fn lost_output_folder_continues_in_fallback() {
 }
 
 #[test]
+fn refused_gpu_encoder_falls_back_to_the_processor() {
+    if !ffmpeg_available() {
+        eprintln!("FFmpeg absent : test ignoré");
+        return;
+    }
+    let Sim { root, platform } = sim();
+    let mut plan = plan(&root, vec![application("Carte", "immediate")]);
+    // Sans carte NVIDIA, NVENC refuse de démarrer à chaque essai.
+    plan.encoder = EncoderChoice { kind: EncoderKind::Nvenc, codec: Codec::H264 };
+    let mut session = Session::start(platform, plan).expect("démarrage");
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        let status = &session.status()[0];
+        if status.error.as_deref().is_some_and(|e| e.contains("passe sur le processeur")) {
+            break;
+        }
+        assert!(Instant::now() < deadline, "pas de bascule sur le processeur : {status:?}");
+        assert_ne!(status.state, SourceState::Failed, "{status:?}");
+        thread::sleep(Duration::from_millis(200));
+    }
+    thread::sleep(Duration::from_secs(3));
+    let summaries = session.stop();
+    let summary = &summaries[0];
+    assert!(summary.error.as_deref().is_some_and(|e| e.contains("processeur")), "{summary:?}");
+    // Les essais ratés n'ont laissé aucun fichier ; la suite est bien écrite.
+    assert_eq!(summary.outputs.len(), 1, "{:?}", summary.outputs);
+    assert!(measure(&summary.outputs[0]).0 > 2.0);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn frozen_encoder_is_detected_and_replaced() {
     let pkill = Command::new("pkill").arg("--version").output().is_ok_and(|o| o.status.success());
     if !ffmpeg_available() || !pkill {

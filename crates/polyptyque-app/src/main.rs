@@ -16,7 +16,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 
 use anyhow::Result;
-use polyptyque_core::{naming, paths};
+use polyptyque_core::{naming, paths, storage};
 use simplelog::{ConfigBuilder, LevelFilter, WriteLogger};
 
 slint::include_modules!();
@@ -96,5 +96,9 @@ fn init_logging() -> Option<PathBuf> {
     let _ = builder.set_time_offset_to_local();
     let _ = WriteLogger::init(LevelFilter::Info, builder.build(), file);
     std::panic::set_hook(Box::new(|info| log::error!("erreur interne : {info}")));
+    let removed = storage::prune_old_logs(&dir, storage::LOG_RETENTION);
+    if removed > 0 {
+        log::info!("{removed} journal(aux) de plus de 30 jours effacé(s)");
+    }
     Some(path)
 }

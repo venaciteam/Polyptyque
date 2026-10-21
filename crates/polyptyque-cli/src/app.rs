@@ -144,5 +144,6 @@ fn init_logging() -> Result<std::path::PathBuf> {
         log::error!("erreur interne : {info}");
         eprintln!("Erreur interne : {info}");
     }));
+    polyptyque_core::storage::prune_old_logs(&dir, polyptyque_core::storage::LOG_RETENTION);
     Ok(path)
 }

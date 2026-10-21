@@ -3,6 +3,7 @@
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result};
 
@@ -32,6 +33,37 @@ pub fn dir_writable(dir: &Path) -> bool {
     let writable = fs::write(&probe, b"").is_ok();
     let _ = fs::remove_file(&probe);
     writable
+}
+
+/// Durée de conservation des journaux.
+pub const LOG_RETENTION: Duration = Duration::from_secs(30 * 24 * 3600);
+
+/// Efface les journaux de Polyptyque (`polyptyque_….log` et dossiers
+/// `session_…`) plus anciens que `max_age`. Rien d'autre n'est touché.
+/// Renvoie le nombre d'éléments effacés.
+pub fn prune_old_logs(dir: &Path, max_age: Duration) -> usize {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return 0;
+    };
+    let now = SystemTime::now();
+    let mut removed = 0;
+    for entry in entries.filter_map(|e| e.ok()) {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let Ok(meta) = entry.metadata() else {
+            continue;
+        };
+        let ours = (meta.is_file() && name.starts_with("polyptyque_") && name.ends_with(".log"))
+            || (meta.is_dir() && name.starts_with("session_"));
+        let old = meta.modified().ok().and_then(|m| now.duration_since(m).ok()).is_some_and(|age| age > max_age);
+        if !ours || !old {
+            continue;
+        }
+        let result = if meta.is_dir() { fs::remove_dir_all(entry.path()) } else { fs::remove_file(entry.path()) };
+        if result.is_ok() {
+            removed += 1;
+        }
+    }
+    removed
 }
 
 /// `config.toml` + `.precedent` → `config.toml.precedent`.
@@ -65,6 +97,21 @@ mod tests {
         fs::write(&file, b"").unwrap();
         // Un fichier à la place du dossier : impossible d'y écrire.
         assert!(!dir_writable(&file.join("sous-dossier")));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn only_old_logs_are_pruned() {
+        let dir = std::env::temp_dir().join(format!("polyptyque-storage-{}", crate::config::new_id()));
+        fs::create_dir_all(dir.join("session_2026-01-01_10h00")).unwrap();
+        fs::write(dir.join("polyptyque_2026-01-01_10h00.log"), b"").unwrap();
+        fs::write(dir.join("autre.txt"), b"").unwrap();
+        // Rien n'est assez vieux.
+        assert_eq!(prune_old_logs(&dir, LOG_RETENTION), 0);
+        // Tout ce qui est à nous est « vieux » avec une durée nulle.
+        std::thread::sleep(Duration::from_millis(20));
+        assert_eq!(prune_old_logs(&dir, Duration::ZERO), 2);
+        assert!(dir.join("autre.txt").exists());
         fs::remove_dir_all(dir).unwrap();
     }
 

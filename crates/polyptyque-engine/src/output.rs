@@ -20,7 +20,7 @@ use anyhow::{Context, Result};
 use crossbeam_channel::Receiver;
 use polyptyque_core::config::{CHANNELS, SAMPLE_RATE};
 use polyptyque_core::encoder::{
-    audio_recording_args, recording_args, AudioRecordingSpec, EncoderChoice, RecordingSpec,
+    audio_recording_args, recording_args, AudioRecordingSpec, EncoderChoice, EncoderKind, RecordingSpec,
 };
 use polyptyque_core::naming;
 use polyptyque_core::platform::{Nv12Frame, Platform};
@@ -84,7 +84,7 @@ enum PartEnd {
 
 impl OutputTask {
     pub fn run(self) {
-        let OutputTask { platform, plan, shared, video, audio } = self;
+        let OutputTask { platform, mut plan, shared, video, audio } = self;
         let mut part = 1u32;
         let mut quick_failures = 0u32;
         loop {
@@ -145,13 +145,34 @@ impl OutputTask {
                 return;
             }
             quick_failures = if started.elapsed() < QUICK_FAILURE { quick_failures + 1 } else { 1 };
-            if quick_failures >= MAX_QUICK_FAILURES {
+            // Encodeur de la carte graphique refusé (limite d'encodages de
+            // la carte, pilote) : la source passe sur le processeur plutôt
+            // que de s'arrêter.
+            let refused = nvenc_session_refused(&reason);
+            let switch = plan.video
+                && plan.encoder.kind != EncoderKind::Software
+                && (refused || quick_failures >= MAX_QUICK_FAILURES);
+            if switch {
+                let note = if refused {
+                    "Limite d'encodages simultanés de la carte NVIDIA atteinte (autres logiciels compris) : \
+                     cette source passe sur le processeur"
+                        .to_string()
+                } else {
+                    format!("{} ne démarre pas : cette source passe sur le processeur", plan.encoder.kind.label())
+                };
+                log::warn!("[{}] {note} ({reason})", plan.title);
+                plan.encoder = EncoderChoice { kind: EncoderKind::Software, codec: plan.encoder.codec };
+                quick_failures = 0;
+                part += 1;
+                shared.note_error(format!("{note}. Suite dans la partie {part}"));
+            } else if quick_failures >= MAX_QUICK_FAILURES {
                 shared.fail(format!("l'encodeur s'arrête dès son démarrage : {reason}"));
                 return;
+            } else {
+                part += 1;
+                log::warn!("[{}] {reason} ; relance dans un nouveau fichier (partie {part})", plan.title);
+                shared.note_error(format!("Encodeur relancé : la suite est dans la partie {part}"));
             }
-            part += 1;
-            log::warn!("[{}] {reason} ; relance dans un nouveau fichier (partie {part})", plan.title);
-            shared.note_error(format!("Encodeur relancé : la suite est dans la partie {part}"));
             // Courte pause, plus longue si les échecs se répètent.
             let resume_at = Instant::now() + Duration::from_secs(quick_failures as u64);
             while Instant::now() < resume_at {
@@ -437,6 +458,14 @@ fn resume_positions(video_frames: u64, audio_bytes: u64, fps: u32) -> (u64, u64)
     (start_frame, start_sample * frame_bytes)
 }
 
+/// La carte NVIDIA refuse une session d'encodage de plus : les cartes
+/// GeForce limitent le nombre d'encodages simultanés pour tout l'ordinateur.
+/// FFmpeg l'annonce par « OpenEncodeSessionEx failed: out of memory (10) »,
+/// parfois « incompatible client key (21) ».
+fn nvenc_session_refused(reason: &str) -> bool {
+    reason.contains("OpenEncodeSessionEx failed")
+}
+
 pub(crate) fn clock(seconds: u64) -> String {
     format!("{:02}:{:02}:{:02}", seconds / 3600, seconds / 60 % 60, seconds % 60)
 }
@@ -496,6 +525,14 @@ mod tests {
         assert_eq!(part_path(&first, &dir, 2), dir.join(format!("{stem}_partie2.mkv")));
         let other = dir.join("secours");
         assert_eq!(part_path(&first, &other, 3), other.join(format!("{stem}_partie3.mkv")));
+    }
+
+    #[test]
+    fn nvenc_refusal_is_recognised() {
+        let reason = "l'encodeur s'est arrêté (exit code: 1) : [h264_nvenc @ 0x1] OpenEncodeSessionEx failed: \
+                      out of memory (10): (no details) | Error while opening encoder";
+        assert!(nvenc_session_refused(reason));
+        assert!(!nvenc_session_refused("l'encodeur s'est arrêté (exit code: 1) : Broken pipe"));
     }
 
     #[test]
