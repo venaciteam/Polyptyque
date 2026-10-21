@@ -45,6 +45,15 @@ fn main() {
 
 #[cfg(windows)]
 fn launch() -> Result<()> {
+    use polyptyque_windows::single_instance::{self, Instance};
+    // Tenu jusqu'à la fermeture de Polyptyque.
+    let _instance = match single_instance::acquire() {
+        Instance::First(lock) => lock,
+        Instance::AlreadyOpen => {
+            log::info!("Polyptyque est déjà ouvert : sa fenêtre est ramenée au premier plan");
+            return Ok(());
+        }
+    };
     let platform = Arc::new(polyptyque_windows::WindowsPlatform::new());
     let paths = controller::Paths { config: paths::config_file(), profiles: paths::profiles_dir() };
     controller::run(platform, paths, None)

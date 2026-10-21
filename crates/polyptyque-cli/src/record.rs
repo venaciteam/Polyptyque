@@ -88,6 +88,7 @@ pub fn run(platform: &Arc<dyn Platform>, config: &Config) -> Result<()> {
         encoder,
         ffmpeg,
         log_dir: log_dir.clone(),
+        fallback_dir: paths::default_output_dir(),
         microphone: settings
             .microphone
             .enabled

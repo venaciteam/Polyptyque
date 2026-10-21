@@ -24,6 +24,7 @@ use polyptyque_core::encoder::{
 };
 use polyptyque_core::naming;
 use polyptyque_core::platform::{Nv12Frame, Platform};
+use polyptyque_core::storage;
 
 use crate::shared::Shared;
 use crate::writer::{self, PartControl, WriterJob};
@@ -56,6 +57,9 @@ pub(crate) struct OutputPlan {
     pub title: String,
     /// Fichier de la première partie.
     pub first_output: PathBuf,
+    /// Dossier des parties suivantes si celui de la première devient
+    /// inaccessible (disque externe débranché, par exemple).
+    pub fallback_dir: PathBuf,
     /// Journal de FFmpeg, commun à toutes les parties.
     pub log: PathBuf,
     /// Préfixe unique des tubes nommés de cette source.
@@ -84,7 +88,7 @@ impl OutputTask {
         let mut part = 1u32;
         let mut quick_failures = 0u32;
         loop {
-            let output = if part == 1 { plan.first_output.clone() } else { part_path(&plan.first_output, part) };
+            let output = if part == 1 { plan.first_output.clone() } else { next_part_path(&plan, &shared, part) };
             let (video_start, audio_start) = if part == 1 {
                 (0, 0)
             } else if plan.video {
@@ -120,7 +124,14 @@ impl OutputTask {
                 Ok(running) => running.supervise(&shared, &plan.log),
                 Err(e) => PartEnd::Crashed(format!("démarrage de l'encodeur impossible : {e:#}")),
             };
-            if !output.exists() || std::fs::metadata(&output).is_ok_and(|m| m.len() == 0) {
+            let nothing_written = match std::fs::metadata(&output) {
+                Ok(meta) => meta.len() == 0,
+                // Fichier absent d'un dossier accessible : jamais créé. Un
+                // dossier devenu inaccessible (disque débranché) garde au
+                // contraire son fichier dans la liste.
+                Err(_) => output.parent().is_some_and(Path::is_dir),
+            };
+            if nothing_written {
                 // Rien d'écrit : on ne garde pas de fichier vide.
                 let _ = std::fs::remove_file(&output);
                 shared.remove_output(&output);
@@ -391,8 +402,24 @@ impl Part {
 }
 
 /// Fichier d'une partie suivante : `nom_partie2.mkv`.
-fn part_path(first: &Path, part: u32) -> PathBuf {
-    let dir = first.parent().unwrap_or(Path::new("."));
+/// Fichier de la partie `part` : à côté de la première, ou dans le dossier
+/// de secours si ce dossier n'est plus accessible.
+fn next_part_path(plan: &OutputPlan, shared: &Shared, part: u32) -> PathBuf {
+    let dir = plan.first_output.parent().unwrap_or(Path::new("."));
+    if storage::dir_writable(dir) || !storage::dir_writable(&plan.fallback_dir) {
+        return part_path(&plan.first_output, dir, part);
+    }
+    let message = format!(
+        "Dossier {} inaccessible : la suite est enregistrée dans {}",
+        dir.display(),
+        plan.fallback_dir.display()
+    );
+    log::warn!("[{}] {message}", plan.title);
+    shared.note_error(message);
+    part_path(&plan.first_output, &plan.fallback_dir, part)
+}
+
+fn part_path(first: &Path, dir: &Path, part: u32) -> PathBuf {
     let stem = first.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
     let ext = first.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_else(|| "mkv".into());
     naming::unique_path(dir, &format!("{stem}_partie{part}"), &ext, &Default::default())
@@ -466,7 +493,9 @@ mod tests {
         let dir = std::env::temp_dir();
         let first = dir.join(format!("polyptyque-{}.mkv", polyptyque_core::config::new_id()));
         let stem = first.file_stem().unwrap().to_string_lossy().into_owned();
-        assert_eq!(part_path(&first, 2), dir.join(format!("{stem}_partie2.mkv")));
+        assert_eq!(part_path(&first, &dir, 2), dir.join(format!("{stem}_partie2.mkv")));
+        let other = dir.join("secours");
+        assert_eq!(part_path(&first, &other, 3), other.join(format!("{stem}_partie3.mkv")));
     }
 
     #[test]

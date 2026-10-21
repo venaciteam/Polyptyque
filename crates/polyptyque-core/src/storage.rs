@@ -22,6 +22,18 @@ pub fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
     Ok(())
 }
 
+/// Vrai si l'on peut écrire dans `dir` (créé au besoin) : disque branché,
+/// droits suffisants, place pour un fichier vide.
+pub fn dir_writable(dir: &Path) -> bool {
+    if fs::create_dir_all(dir).is_err() {
+        return false;
+    }
+    let probe = dir.join(format!(".polyptyque-essai-{}", crate::config::new_id()));
+    let writable = fs::write(&probe, b"").is_ok();
+    let _ = fs::remove_file(&probe);
+    writable
+}
+
 /// `config.toml` + `.precedent` → `config.toml.precedent`.
 pub fn sibling(path: &Path, suffix: &str) -> PathBuf {
     let mut name = path.file_name().map(|n| n.to_os_string()).unwrap_or_default();
@@ -41,6 +53,18 @@ mod tests {
         write_atomic(&path, b"second").unwrap();
         assert_eq!(fs::read_to_string(&path).unwrap(), "second");
         assert!(!sibling(&path, ".tmp").exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn writable_dirs() {
+        let dir = std::env::temp_dir().join(format!("polyptyque-storage-{}", crate::config::new_id()));
+        assert!(dir_writable(&dir.join("nouveau")));
+        assert_eq!(fs::read_dir(dir.join("nouveau")).unwrap().count(), 0);
+        let file = dir.join("fichier");
+        fs::write(&file, b"").unwrap();
+        // Un fichier à la place du dossier : impossible d'y écrire.
+        assert!(!dir_writable(&file.join("sous-dossier")));
         fs::remove_dir_all(dir).unwrap();
     }
 

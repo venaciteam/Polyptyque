@@ -36,6 +36,9 @@ pub struct SessionPlan {
     pub ffmpeg: PathBuf,
     /// Dossier des journaux de cette session.
     pub log_dir: PathBuf,
+    /// Dossier de secours si le dossier d'enregistrement devient
+    /// inaccessible en cours de route.
+    pub fallback_dir: PathBuf,
     /// Micro enregistré dans un fichier séparé, pendant toute la session.
     pub microphone: Option<MicrophonePlan>,
 }
@@ -188,6 +191,7 @@ pub struct Session {
     encoder: EncoderChoice,
     ffmpeg: PathBuf,
     log_dir: PathBuf,
+    fallback_dir: PathBuf,
     /// Préfixe des tubes nommés, unique sur la machine.
     tag: String,
     /// Source par source, la dernière exécution (une source arrêtée puis
@@ -218,6 +222,7 @@ impl Session {
             encoder: plan.encoder,
             ffmpeg: plan.ffmpeg,
             log_dir: plan.log_dir,
+            fallback_dir: plan.fallback_dir,
             sources: Vec::new(),
             retired: Vec::new(),
             microphone: None,
@@ -352,6 +357,7 @@ impl Session {
                 audio_bitrate_kbps: settings.audio.bitrate_kbps,
                 title: name.to_string(),
                 first_output: output.clone(),
+                fallback_dir: self.fallback_dir.clone(),
                 log: log.clone(),
                 pipe_prefix: format!("{}-{order}", self.tag),
             },
@@ -440,8 +446,15 @@ impl Session {
         bytes_per_hour(self.settings.video.bitrate_kbps, audio) * self.recording_count() as u64 + microphone
     }
 
+    /// Espace libre là où s'écrivent les fichiers (le dossier de secours si
+    /// le dossier choisi est devenu inaccessible).
     pub fn free_space(&self) -> Option<u64> {
-        self.platform.free_disk_space(&self.settings.output_dir)
+        let dir = self
+            .files_in_progress()
+            .last()
+            .and_then(|f| f.parent().map(Path::to_path_buf))
+            .unwrap_or_else(|| self.settings.output_dir.clone());
+        self.platform.free_disk_space(&dir)
     }
 
     pub fn status(&mut self) -> Vec<SourceStatus> {

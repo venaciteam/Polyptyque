@@ -12,6 +12,7 @@ pub mod hotkeys;
 mod pipe;
 mod process;
 pub mod session_end;
+pub mod single_instance;
 mod system;
 mod video;
 mod windows_list;

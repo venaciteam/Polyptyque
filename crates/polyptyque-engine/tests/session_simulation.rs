@@ -266,6 +266,7 @@ fn plan(root: &Path, sources: Vec<Source>) -> SessionPlan {
         encoder: EncoderChoice { kind: EncoderKind::Software, codec: Codec::H264 },
         ffmpeg: PathBuf::from("ffmpeg"),
         log_dir: root.join("journaux"),
+        fallback_dir: root.join("secours"),
         microphone: None,
     }
 }
@@ -344,6 +345,36 @@ fn crashed_encoder_resumes_in_a_new_part() {
         .filter(|n| n.contains(".reparation") || n.contains(".avant-reparation") || n.contains(".partiel"))
         .collect();
     assert!(leftovers.is_empty(), "{leftovers:?}");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn lost_output_folder_continues_in_fallback() {
+    let pkill = Command::new("pkill").arg("--version").output().is_ok_and(|o| o.status.success());
+    if !ffmpeg_available() || !pkill {
+        eprintln!("FFmpeg ou pkill absent : test ignoré");
+        return;
+    }
+    let Sim { root, platform } = sim();
+    let plan = plan(&root, vec![application("Débranchée", "immediate")]);
+    let mut session = Session::start(platform, plan).expect("démarrage");
+    thread::sleep(Duration::from_secs(3));
+    // Disque débranché : le dossier disparaît (remplacé par un fichier, pour
+    // qu'il ne puisse pas être recréé) et l'encodeur tombe en erreur.
+    let outputs = root.join("sorties");
+    fs::rename(&outputs, root.join("sorties-debranchees")).unwrap();
+    fs::write(&outputs, b"").unwrap();
+    let pattern = format!("{}/.*-0-p1-video", regex_escape(&root.join("tubes").display().to_string()));
+    assert!(Command::new("pkill").args(["-KILL", "-f", &pattern]).status().unwrap().success());
+    thread::sleep(Duration::from_secs(4));
+    let status = &session.status()[0];
+    assert_eq!(status.part, 2, "{status:?}");
+    assert!(status.output.starts_with(root.join("secours")), "{status:?}");
+    assert!(status.error.as_deref().is_some_and(|e| e.contains("inaccessible")), "{status:?}");
+    let summaries = session.stop();
+    let part2 = &summaries[0].outputs[1];
+    assert!(part2.ends_with("secours/Simulation_Débranchée_partie2.mkv"), "{part2:?}");
+    assert!(measure(part2).0 > 1.0);
     fs::remove_dir_all(root).unwrap();
 }
 

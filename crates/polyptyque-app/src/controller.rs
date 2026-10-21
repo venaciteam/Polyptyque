@@ -27,6 +27,7 @@ use polyptyque_core::naming;
 use polyptyque_core::paths;
 use polyptyque_core::platform::{BrowserInstall, Platform, WindowInfo};
 use polyptyque_core::recovery::SessionRecord;
+use polyptyque_core::storage;
 use polyptyque_engine::remux;
 use polyptyque_engine::resolve::{self, PrepareEvent};
 use polyptyque_engine::{probe, MicrophonePlan, Session, SessionPlan, SourceState, SourceStatus, SourceSummary};
@@ -105,6 +106,9 @@ struct Prepared {
     ffmpeg: PathBuf,
     encoder: EncoderChoice,
     missing: Vec<String>,
+    /// Dossier d'enregistrement : celui des réglages, ou celui de secours.
+    output_dir: PathBuf,
+    output_note: Option<String>,
 }
 
 /// Raccourci clavier global déclenché.
@@ -780,13 +784,16 @@ impl App {
             }
         };
         let (date, time) = naming::now_parts();
+        let mut settings = config.settings.clone();
+        settings.output_dir = prepared.output_dir.clone();
         let plan = SessionPlan {
             scene_name: scene.name.clone(),
             sources: scene.sources.clone(),
-            settings: config.settings.clone(),
+            settings,
             encoder: prepared.encoder,
             ffmpeg: prepared.ffmpeg,
             log_dir: paths::logs_dir().join(format!("session_{date}_{time}")),
+            fallback_dir: paths::default_output_dir(),
             microphone: config
                 .settings
                 .microphone
@@ -834,7 +841,9 @@ impl App {
                         }
                     });
                 }
-                if prepared.missing.is_empty() {
+                if let Some(note) = &prepared.output_note {
+                    self.toast(&format!("Enregistrement démarré. {note}"), 2);
+                } else if prepared.missing.is_empty() {
                     let message = match scene.sources.as_slice() {
                         [single] if config.active_scene().sources.len() > 1 => {
                             format!("Enregistrement de « {} » démarré.", single.name)
@@ -1011,7 +1020,14 @@ impl App {
         let errors: Vec<String> =
             summaries.iter().filter_map(|s| s.error.as_ref().map(|e| format!("{} : {e}", s.name))).collect();
         let total: u64 = summaries.iter().map(|s| s.file_size).sum();
-        let dir = self.config.borrow().settings.output_dir.display().to_string();
+        // Dossier réel des fichiers (celui de secours si le dossier choisi
+        // était inaccessible).
+        let dir = summaries
+            .iter()
+            .find_map(|s| s.outputs.first().and_then(|f| f.parent().map(Path::to_path_buf)))
+            .unwrap_or_else(|| self.config.borrow().settings.output_dir.clone())
+            .display()
+            .to_string();
         let count: usize = summaries.iter().map(|s| s.outputs.len()).sum();
         let mut message = format!("{count} fichier(s) enregistré(s), {} au total, dans {dir}.", format::bytes(total));
         if let Some(reason) = reason {
@@ -2471,6 +2487,20 @@ fn prepare(platform: &dyn Platform, config: &Config, scene: &Scene) -> Result<Pr
             video.hardware.label()
         )
     })?;
+    // Dossier choisi inaccessible (disque débranché, autre PC) : dossier de
+    // secours plutôt qu'un refus de démarrer.
+    let chosen = &config.settings.output_dir;
+    let (output_dir, output_note) = if storage::dir_writable(chosen) {
+        (chosen.clone(), None)
+    } else {
+        let fallback = paths::default_output_dir();
+        if !storage::dir_writable(&fallback) {
+            return Err(anyhow!("impossible d'écrire dans {} ni dans {}", chosen.display(), fallback.display()));
+        }
+        log::warn!("dossier {} inaccessible : enregistrement dans {}", chosen.display(), fallback.display());
+        let note = format!("Dossier {} inaccessible : enregistrement dans {}.", chosen.display(), fallback.display());
+        (fallback, Some(note))
+    };
     post(|app| app.set_busy("Ouverture des fenêtres…"));
     let missing = resolve::prepare_windows(platform, &scene.sources, LAUNCH_WAIT, |event| {
         if let PrepareEvent::Launching(source) = event {
@@ -2478,7 +2508,7 @@ fn prepare(platform: &dyn Platform, config: &Config, scene: &Scene) -> Result<Pr
             post(move |app| app.set_busy(&text));
         }
     });
-    Ok(Prepared { ffmpeg, encoder, missing })
+    Ok(Prepared { ffmpeg, encoder, missing, output_dir, output_note })
 }
 
 /// Même fichier, quelle que soit l'écriture du chemin (majuscules, `..`).
