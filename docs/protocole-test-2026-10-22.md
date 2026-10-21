@@ -77,7 +77,7 @@ type: guide
 
 - [ ] **C1 - Rétablir une fenêtre réduite**
 	- Faire : pendant un enregistrement, réduire une fenêtre capturée dans la barre des tâches.
-	- Attendu : la carte affiche « Réduite (image figée) » et un bouton **« Rétablir la fenêtre »**. Un clic fait revenir la fenêtre **sans lui donner le focus**, et la carte repasse à « Enregistre ».
+	- Attendu : la carte affiche « Réduite (image figée) » et un bouton **« Rétablir la fenêtre »**. Un clic fait revenir la fenêtre **sans lui donner le focus**, et la carte repasse à « Enregistre ». Une fenêtre qui était en plein écran revient en plein écran (et prend alors le focus).
 	- Variante : l'écran débranché d'hier. La fenêtre doit revenir **sur l'écran principal**.
 - [ ] **C2 - Rouvrir une fenêtre perdue**
 	- Faire : pendant un enregistrement, fermer un Firefox capturé, puis cliquer tout de suite sur **« Rouvrir la fenêtre »** sur sa carte.
@@ -120,7 +120,7 @@ type: guide
 - [ ] **D1 - Aperçus** : aperçus en direct nets, définition adaptée quand on agrandit la fenêtre de Polyptyque ; <kbd>Ctrl</kbd> + <kbd>Maj</kbd> + <kbd>F11</kbd> les coupe et les rétablit.
 - [ ] **D2 - Enregistrement complet** : trois sources, deux minutes, « Tout arrêter ». Trois fichiers de même durée, son de chaque fenêtre isolé, synchronisation correcte.
 - [ ] **D3 - Source par source** : pendant un enregistrement, arrêter une source avec le bouton rond de sa carte, puis la relancer. Les autres continuent ; la source relancée a un nouveau fichier.
-- [ ] **D4 - Encodeur relancé** : pendant un enregistrement, Gestionnaire des tâches > onglet Détails > un `ffmpeg.exe` > Fin de tâche. La carte signale « Encodeur relancé… » et un fichier `…_partie2.mkv` apparaît ; l'enregistrement continue.
+- [ ] **D4 - Encodeur relancé** : pendant un enregistrement, Gestionnaire des tâches > onglet Détails > un `ffmpeg.exe` > Fin de tâche. La carte signale « Encodeur relancé… » et un fichier `…_partie2.mkv` apparaît ; l'enregistrement continue. Après « Tout arrêter », une fenêtre **« Fichiers à réparer »** propose de réparer la première partie, coupée net : accepter, puis vérifier dans VLC que sa durée s'affiche.
 - [ ] **D5 - Micro** (si activé dans les réglages) : fichier `…_Micro.mka`, calé sur les vidéos.
 - [ ] **D6 - Conversion MP4** : « Convertir en MP4… » sur un fichier ; le MP4 se lit et aucun fichier `….partiel` ne reste dans le dossier.
 - [ ] **D7 - Raccourcis** : <kbd>Ctrl</kbd> + <kbd>Maj</kbd> + <kbd>F9</kbd> démarre et arrête ; <kbd>Ctrl</kbd> + <kbd>Maj</kbd> + <kbd>F10</kbd> réduit et rappelle Polyptyque.
