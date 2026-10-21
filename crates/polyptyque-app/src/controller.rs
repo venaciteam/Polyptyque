@@ -1333,7 +1333,9 @@ impl App {
         if sheet_open || self.recording() || self.busy.get() || self.deferred.borrow().is_empty() {
             return;
         }
-        match self.deferred.borrow_mut().remove(0) {
+        // Emprunt rendu avant d'afficher : l'affichage peut relire la file.
+        let next = self.deferred.borrow_mut().remove(0);
+        match next {
             Deferred::Incident(record, reports) => self.present_incident(record, reports),
             Deferred::Repair(files) => self.ask(
                 Confirm::RepairFiles(files.clone()),
