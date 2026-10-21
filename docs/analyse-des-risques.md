@@ -3,7 +3,7 @@ title: Polyptyque - Analyse des risques et reprise après incident
 aliases: ["Analyse des risques Polyptyque", "Reprise après incident"]
 tags: [polyptyque, projet, fiabilite, analyse-des-risques]
 created: 2026-10-21
-status: draft
+status: active
 type: projet
 ---
 
@@ -14,6 +14,9 @@ type: projet
 > Pour chaque cas : ce que fait Polyptyque **aujourd'hui** (vérifié dans le code de la branche `dev` au 2026-10-21, ou signalé « à vérifier »), ce qui manque, et la proposition.
 > Les propositions sont regroupées en trois lots par priorité, à valider avant toute réalisation.
 > Complète le [[cahier-des-charges|cahier des charges]].
+
+> [!success] Mise à jour du 2026-10-22
+> Le **lot 1** est réalisé (à tester sur la machine de référence), ainsi que la conversion MP4 sous nom temporaire (A6, lot 2). Les colonnes « Aujourd'hui » décrivent l'état **avant** ces travaux ; le [[#Plan d'action proposé|plan d'action]] indique ce qui est fait.
 
 ## Table des matières
 
@@ -143,15 +146,15 @@ Chaque scénario porte un identifiant (A1, B3…) repris dans le plan d'action.
 ### Lot 1 - Reprise après incident
 
 > [!todo] Priorité 1
-> - [ ] **Journal de session** (A1, B1) : au démarrage d'un enregistrement, Polyptyque note la scène, les sources et les fichiers en cours dans un petit fichier, effacé à l'arrêt normal. S'il est encore là au lancement suivant, c'est qu'il y a eu un incident :
+> - [x] **Journal de session** (A1, B1) : au démarrage d'un enregistrement, Polyptyque note la scène, les sources et les fichiers en cours dans un petit fichier, effacé à l'arrêt normal. S'il est encore là au lancement suivant, c'est qu'il y a eu un incident :
 > 	- bilan affiché : quels fichiers, quelle durée, lisibles ou non ;
 > 	- **réparation sans réencodage** des fichiers interrompus (index reconstruit, durée correcte), l'original étant gardé jusqu'à la réussite ;
-> 	- bouton **« Reprendre l'enregistrement »** (nouveaux fichiers, suffixe `_reprise`).
-> - [ ] **Fils protégés** (A2) : une erreur interne dans une source est affichée et sa capture relancée.
-> - [ ] **Instance unique** (A4) : un second lancement ramène la fenêtre existante.
-> - [ ] **Réglages sauvegardés** (A5) : écriture forcée sur le disque, cinq sauvegardes tournantes, restauration automatique.
-> - [ ] **Rouvrir et rétablir** (C1, C2, B4) : boutons « Rouvrir » (fenêtre perdue) et « Rétablir la fenêtre » (fenêtre réduite) pendant l'enregistrement ; relance automatique des sources qui l'autorisent.
-> - [ ] **Dossier de secours** (D4) : si le dossier d'enregistrement devient inaccessible, la suite est écrite dans `Vidéos\Polyptyque`, avec message.
+> 	- bouton **« Reprendre l'enregistrement »** (nouveaux fichiers, nommés d'après leur heure de départ comme d'habitude : le suffixe `_reprise` prévu n'a pas été ajouté, le nom suffit à les distinguer).
+> - [x] **Fils protégés** (A2) : une erreur interne dans une source est affichée et sa capture relancée.
+> - [x] **Instance unique** (A4) : un second lancement ramène la fenêtre existante.
+> - [x] **Réglages sauvegardés** (A5) : écriture forcée sur le disque, cinq sauvegardes tournantes, restauration automatique.
+> - [x] **Rouvrir et rétablir** (C1, C2, B4) : boutons « Rouvrir » (fenêtre perdue) et « Rétablir la fenêtre » (fenêtre réduite) pendant l'enregistrement ; relance automatique des sources qui l'autorisent.
+> - [x] **Dossier de secours** (D4) : si le dossier d'enregistrement devient inaccessible, la suite est écrite dans `Vidéos\Polyptyque`, avec message.
 
 ### Lot 2 - Situations prévisibles
 
@@ -161,7 +164,7 @@ Chaque scénario porte un identifiant (A1, B3…) repris dans le plan d'action.
 > - [ ] **Mises à jour de Polyptyque** (A8) : passer à la première version stable de Velopack qui corrige l'échec du remplacement.
 > - [ ] **Limite d'encodages de la carte NVIDIA** (D2) : bascule automatique sur le processeur pour la source refusée.
 > - [ ] **FAT32** (D5) : avertissement et découpage propre avant 4 Go.
-> - [ ] **Conversion MP4** (A6) : nom temporaire jusqu'à la vérification.
+> - [x] **Conversion MP4** (A6) : nom temporaire jusqu'à la vérification.
 
 ### Lot 3 - Confort et prévention
 
@@ -194,9 +197,9 @@ Chaque scénario porte un identifiant (A1, B3…) repris dans le plan d'action.
 
 ## Questions ouvertes
 
-- [ ] **Reprise après incident** : proposée d'un clic, ou automatique (Polyptyque relancé et l'enregistrement repris sans intervention, utile pour une session de nuit sans surveillance) ?
+- [ ] **Reprise après incident** : proposée d'un clic, ou automatique (Polyptyque relancé et l'enregistrement repris sans intervention, utile pour une session de nuit sans surveillance) ? *Réalisé provisoirement : d'un clic.*
 - [ ] **Mise en veille demandée pendant un enregistrement** : arrêter proprement, ou mettre en pause et reprendre au réveil ?
-- [ ] **Réparation des fichiers interrompus** : remplacer le fichier abîmé par sa version réparée, ou garder les deux ?
+- [ ] **Réparation des fichiers interrompus** : remplacer le fichier abîmé par sa version réparée, ou garder les deux ? *Réalisé provisoirement : remplacé, une fois la copie vérifiée (même contenu, avec durée et index).*
 - [ ] **Durée de conservation des journaux** : 30 jours ?
 
 ---

@@ -174,14 +174,16 @@ graph TD
 
 ### Reconnaissance et restauration des fenêtres
 
-Au lancement de Polyptyque, pour chaque source de la scène active :
+Au démarrage d'un enregistrement, pour chaque source enregistrée (les aperçus, eux, cherchent les fenêtres dès le lancement de Polyptyque, sans rien relancer) :
 
 1. **Source navigateur** : recherche du processus dont la ligne de commande contient le dossier du profil dédié. S'il existe, sa fenêtre principale est rattachée ; sinon, le navigateur est relancé avec ce profil.
 2. **Source application** : recherche par ordre de précision décroissante :
 	1. même exécutable, même classe et même titre ;
 	2. même exécutable et même classe ;
 	3. même exécutable, si une seule fenêtre correspond ;
-	4. sinon : relance (si activée) ou demande de confirmation à l'utilisateur en cas d'ambiguïté.
+	4. sinon : relance (si activée).
+	
+	En cas d'ambiguïté, la fenêtre utilisée le plus récemment est retenue, sans question (à revoir si des erreurs de reconnaissance apparaissent).
 3. Chaque source affiche son état : **connectée**, **en attente**, **introuvable**.
 
 > [!tip] Pourquoi c'est fiable pour les navigateurs
@@ -197,10 +199,16 @@ Au lancement de Polyptyque, pour chaque source de la scène active :
 - **Cadence constante** : Windows n'envoie une image que lorsque la fenêtre change ; Polyptyque répète la dernière image pour garantir une cadence fixe (indispensable aux logiciels de montage).
 - **Son continu** : les silences sont comblés pour que le son reste calé sur l'image.
 - **Fenêtre perdue** (fermée, plantée) : le fichier continue avec une **image noire et du silence** ; la source est **rattachée automatiquement** dès que la fenêtre réapparaît.
-- **Fenêtre réduite** : Windows ne la dessine plus, l'image se fige ; un avertissement s'affiche.
+	- Bouton **« Rouvrir la fenêtre »** sur la carte, y compris pendant l'enregistrement.
+	- **Réouverture automatique** après 20 s pour les navigateurs et les applications dont la relance est activée : trois essais par disparition, dix par enregistrement. Firefox encore en train de se fermer ou de redémarrer n'est pas relancé (il afficherait « Firefox est déjà ouvert »).
+- **Fenêtre réduite** : Windows ne la dessine plus, l'image se fige ; un avertissement s'affiche, avec un bouton **« Rétablir la fenêtre »** qui la fait revenir sans lui donner le focus et la replace sur l'écran principal si elle n'est plus sur aucun écran (écran débranché).
 - **Fenêtre redimensionnée** : la résolution du fichier reste fixe, l'image est mise à l'échelle en conservant ses proportions, avec des bandes noires si besoin.
 - **Mise en veille automatique de Windows empêchée** pendant l'enregistrement. Une mise en veille demandée (capot, bouton, menu) ne peut pas l'être : voir B3 dans l'[[analyse-des-risques|analyse des risques]].
 - **Encodeur arrêté ou figé** (plantage de FFmpeg, pilote, 30 s sans avancer) : la capture continue et un nouvel encodeur reprend dans un nouveau fichier `…_partie2.mkv`, image et son recalés au même instant. Trois échecs d'affilée dès le démarrage arrêtent la source, pour ne pas tourner en boucle.
+- **Dossier d'enregistrement inaccessible** (disque externe débranché, autre PC) : au démarrage comme en cours de route, la suite est enregistrée dans `Vidéos\Polyptyque`, avec un message.
+- **Erreur interne** dans la capture d'une source : la capture est relancée au même point de l'horloge (image et son restent calés) ; au-delà de trois relances, la source passe en erreur, sans toucher aux autres.
+- **Enregistrement interrompu** (plantage, coupure de courant, écran bleu) : au lancement suivant, une fenêtre « Enregistrement interrompu » fait le bilan des fichiers et propose de **réparer** ceux qui ont été coupés net (durée et index reconstruits sans réencodage, original remplacé après vérification) et de **reprendre l'enregistrement**.
+- **Une seule copie** de Polyptyque à la fois : un second lancement ramène la fenêtre déjà ouverte.
 - **Arrêt, redémarrage ou déconnexion de Windows** pendant un enregistrement : Polyptyque le signale à Windows, qui l'affiche dans son écran d'arrêt et permet d'annuler. Si l'arrêt continue malgré tout, les fichiers sont finalisés avant la fermeture. Un arrêt critique (batterie épuisée) n'est jamais bloqué.
 
 ### Microphone
@@ -322,7 +330,7 @@ Inspirée d'[[OBS Studio]], volontairement allégée, thème sombre.
 | Action | Proposition |
 |---|---|
 | Démarrer / arrêter tout | <kbd>Ctrl</kbd> + <kbd>Maj</kbd> + <kbd>F9</kbd> |
-| Afficher / masquer Polyptyque | <kbd>Ctrl</kbd> + <kbd>Maj</kbd> + <kbd>F10</kbd> |
+| Afficher / réduire Polyptyque | <kbd>Ctrl</kbd> + <kbd>Maj</kbd> + <kbd>F10</kbd> |
 | Activer / couper les aperçus | <kbd>Ctrl</kbd> + <kbd>Maj</kbd> + <kbd>F11</kbd> |
 
 > [!tip] Pourquoi pas Ctrl + Alt
@@ -344,14 +352,14 @@ Solution retenue : **[[Velopack]]** (outil d'installation et de mise à jour éc
 
 | Point | Comportement |
 |---|---|
-| Fichier livré | Un seul `Setup.exe` |
+| Fichier livré | Un seul `Polyptyque-Setup.exe` |
 | Questions posées | Aucune : installation dans le dossier de l'utilisateur, puis lancement de Polyptyque |
 | Droits administrateur | Non requis (pas d'alerte UAC) |
 | Apparence | Animation d'accueil : les trois panneaux du logo s'allument tour à tour (`assets/logo/installation.gif`) |
 | Raccourcis | Bureau et menu Démarrer |
 | Dossier d'installation | `%LOCALAPPDATA%\PolyptyqueApp`, distinct des données (`%APPDATA%\Polyptyque`, `%LOCALAPPDATA%\Polyptyque`) : une désinstallation efface tout le dossier d'installation mais conserve scènes, réglages, profils de navigateur (connexions) et journaux |
 | Système minimal | Windows 10 version 2004 ; refus avec explication en dessous |
-| Version portable | `Polyptyque-portable.zip`, sans installation. **Prévu** : version autonome, avec scènes, réglages, profils de navigateur (connexions) et journaux dans un dossier `données` à côté de `polyptyque.exe`, rien d'écrit ailleurs sur le PC, pour tout emporter d'un ordinateur à l'autre. Les enregistrements restent dans le dossier choisi (repli sur `Vidéos\Polyptyque` s'il n'existe pas sur le nouvel ordinateur) |
+| Version portable | `Polyptyque-portable.zip`, sans installation et autonome : scènes, réglages et leurs sauvegardes, profils de navigateur (connexions) et journaux dans le dossier `données` du dossier décompressé, rien d'écrit ailleurs sur le PC, pour tout emporter d'un ordinateur à l'autre. Les profils et les navigateurs sont retrouvés automatiquement après un déplacement. Les enregistrements restent dans le dossier choisi (repli sur `Vidéos\Polyptyque` s'il n'existe pas sur le nouvel ordinateur). Reconnue au marqueur `.portable` que Velopack place dans le zip ; les réglages affichent « portable » à côté du numéro de version |
 | Mises à jour | Recherche au démarrage puis toutes les 6 h (désactivable) ; proposées d'un clic, téléchargées avec avancement, puis redémarrage ; jamais pendant un enregistrement ou une conversion (sinon installées au prochain démarrage). Source : publications GitHub du dépôt (fonctionne une fois le dépôt public) |
 | Publication | Étiquette `vX.Y.Z` (identique à la version de `Cargo.toml`) : la fabrication publie la version GitHub, avec mise à jour partielle depuis la précédente |
 | Surcoût | Environ 7,5 Mo pour l'installateur, 5 Mo pour l'outil de mise à jour |
@@ -367,14 +375,16 @@ Solution retenue : **[[Velopack]]** (outil d'installation et de mise à jour éc
 ### Fiabilité
 
 - [x] Tenir **12 h** d'enregistrement continu avec plusieurs sources (validé le 2026-10-21 : 14 h 15 avec trois sources en 1280×720, 30 i/s ; la charge en 1080p60 reste à mesurer).
-- [ ] Fichiers MKV écrits au fil de l'eau, **lisibles même après un plantage** ou une coupure de courant.
+- [x] Fichiers MKV écrits au fil de l'eau, **lisibles même après un plantage** ou une coupure de courant (validé en simulation avec un FFmpeg tué ; un fichier coupé net est réparé sans réencodage).
 - [x] **Désynchronisation** entre fichiers inférieure à une image (16 ms à 60 i/s) sur 12 h (mesuré le 2026-10-21 : après 14 h 15, les sons des trois fichiers se terminent à 2,4 ms près ; durées identiques).
-- [ ] **Isolation des pannes** : une source en échec n'interrompt jamais les autres.
-- [ ] **Relance automatique** d'un encodeur arrêté ou figé, dans un nouveau fichier ; perte limitée à environ une seconde (fichiers écrits par blocs d'une seconde).
-- [ ] **Fermeture de session Windows** : arrêt bloqué avec explication, sinon fichiers finalisés avant la fermeture.
-- [ ] **Surveillance du disque** : estimation avant démarrage, alertes par paliers, arrêt propre (fichiers correctement fermés) si l'espace vient à manquer.
+- [x] **Isolation des pannes** : une source en échec n'interrompt jamais les autres (validé en simulation).
+- [x] **Relance automatique** d'un encodeur arrêté ou figé, dans un nouveau fichier ; perte limitée à environ une seconde (fichiers écrits par blocs d'une seconde). Validé en simulation, avec un vrai plantage et un vrai blocage de FFmpeg.
+- [ ] **Fermeture de session Windows** : arrêt bloqué avec explication, sinon fichiers finalisés avant la fermeture (réalisé, à tester sur la machine de référence).
+- [ ] **Surveillance du disque** : estimation avant démarrage, alertes par paliers, arrêt propre (fichiers correctement fermés) si l'espace vient à manquer. Réalisé : estimation, un seuil d'alerte (texte orange sous 10 Go ou 1 h d'autonomie), arrêt propre sous 1 Go ; manquent les alertes par paliers et un avertissement avant le démarrage.
 - [x] **Mémoire stable** sur 12 h (aucune fuite), vérifiée par des tests d'endurance (2026-10-21 : environ 415 Mo pour Polyptyque et 195 Mo par FFmpeg, sans croissance constatée).
-- [ ] **Journal technique** détaillé pour le diagnostic.
+- [x] **Journal technique** détaillé pour le diagnostic : un journal par lancement, un dossier par enregistrement (journal de chaque FFmpeg), bilan de fin par source.
+- [ ] **Reprise après incident** : bilan, réparation et reprise au lancement suivant (réalisé le 2026-10-22, à tester sur la machine de référence).
+- [ ] **Réglages protégés** : écriture forcée sur le disque, version précédente et une sauvegarde par jour (cinq jours), restauration automatique d'un fichier abîmé (réalisé le 2026-10-22, testé en simulation).
 
 ### Performance
 
@@ -387,7 +397,7 @@ Solution retenue : **[[Velopack]]** (outil d'installation et de mise à jour éc
 
 | Élément | Exigence |
 |---|---|
-| Système | Windows 10 22H2 et Windows 11, 64 bits |
+| Système | Windows 10 version 2004 ou plus récente, et Windows 11, 64 bits |
 | Pilote NVIDIA | 570 ou plus récent avec FFmpeg 8.1 (FFmpeg 9 exigerait 610 ou plus) |
 | Son isolé par programme | Windows 10 version 2004 ou plus récent (la documentation Microsoft indique la build 20348) |
 | Bordure jaune de capture | Retirée quand Windows le permet (Windows 11) ; affichée sinon, sans contournement |
@@ -491,7 +501,7 @@ La session simulée (`polyptyque-engine/tests`) rejoue des enregistrements compl
 | Fermeture de session | `ShutdownBlockReasonCreate`, messages `WM_QUERYENDSESSION` et `WM_ENDSESSION` sur la fenêtre principale | |
 | Conversion d'image | Processeur vidéo Direct3D 11 de la carte graphique | Mise à l'échelle et conversion NV12 BT.709 sans passer par le processeur |
 | Interface | [[Slint]] | Apparence décrite dans des fichiers `.slint` séparés de la logique ; compatible GPL v3 ; accessibilité via AccessKit ; aperçus par tampons d'image |
-| Installateur | [[Velopack]] | Un seul `Setup.exe`, sans question, mises à jour automatiques |
+| Installateur | [[Velopack]] | Un seul `Polyptyque-Setup.exe`, sans question, mises à jour automatiques |
 | Sauvegarde des scènes | Fichier de configuration dans `%APPDATA%\Polyptyque` | |
 | Fabrication des exécutables | GitHub Actions sur machine Windows | |
 
@@ -535,14 +545,23 @@ Seule une implémentation de `Platform` est à écrire pour chaque système (`po
 > - [x] Mises à jour proposées depuis les publications GitHub
 > - [x] README complet
 > - [ ] Validation sur la machine de référence
-> - [ ] Version portable autonome (tout dans son dossier), après les tests de fiabilité
-> - [ ] Bouton « Rétablir la fenêtre » sur une carte « Réduite » : la fenêtre revient et se replace sur un écran branché (cas vu en test : écran débranché pendant l'enregistrement)
+> - [x] Version portable autonome (tout dans son dossier `données`)
+> - [x] Bouton « Rétablir la fenêtre » sur une carte « Réduite » : la fenêtre revient et se replace sur un écran branché (cas vu en test : écran débranché pendant l'enregistrement)
+> - [ ] Validation de la version portable et de l'installateur sur la machine de référence
+
+> [!todo] Étape 3 bis - Reprise après incident (lot 1 de l'[[analyse-des-risques|analyse des risques]]), écrite le 2026-10-22
+> - [x] Journal de session, bilan d'un enregistrement interrompu, réparation sans réencodage, reprise
+> - [x] Fils de capture protégés, instance unique, réglages sauvegardés, dossier de secours
+> - [x] Boutons « Rouvrir la fenêtre » pendant l'enregistrement, réouverture automatique
+> - [x] Conversion MP4 sous un nom temporaire jusqu'à sa vérification (A6, avancé du lot 2)
+> - [x] Journal : passages en « Réduite », bilan de fin par source ; son déclaré stéréo à FFmpeg
+> - [ ] Validation sur la machine de référence
 
 > [!todo] Étape 4 - Publication
 > - [ ] Dépôt public, première version publiée
 > - [ ] FFmpeg compilé par le projet (plus léger, signable)
 > - [ ] Demande de signature gratuite à SignPath Foundation
-> - [ ] Tests d'endurance de 12 h complets
+> - [ ] Tests d'endurance de 12 h complets (un premier test de 14 h 15 réussi le 2026-10-21 en 1280×720, 30 i/s ; à refaire avec les réglages par défaut, 1920×1080 et 60 i/s)
 
 > [!info] Plus tard
 > - Diffusion en direct (gratuite)
@@ -591,6 +610,11 @@ Seule une implémentation de `Platform` est à écrire pour chaque système (`po
 | 2026-10-21 | Recherche du meilleur encodeur conservée à chaque démarrage d'enregistrement (garantit un encodeur fonctionnel, environ une seconde) |
 | 2026-10-21 | Test d'endurance : écran débranché pendant l'enregistrement, fenêtres vues « Réduites » (image figée, son conservé), reprise normale ensuite. Ajout prévu d'un bouton « Rétablir la fenêtre » |
 | 2026-10-21 | Test d'endurance réussi : 14 h 15 min 40 s, trois sources Firefox (1280×720, 30 i/s, 2,5 Mb/s, NVENC). Aucune relance d'encodeur ni fenêtre perdue ; trois fichiers de 14:15:39 ; sons à 2,4 ms près ; image et son synchrones à l'œil ; mémoire stable ; processeur environ 3 %, carte graphique environ 4,5 % par source ; 51,3 Go au total |
+| 2026-10-22 | Fenêtre perdue pendant l'enregistrement : bouton « Rouvrir » et réouverture automatique après 20 s (trois essais par disparition, dix par enregistrement), pour les navigateurs et les applications dont la relance est activée |
+| 2026-10-22 | Enregistrement interrompu : bilan au lancement suivant ; réparation et reprise proposées d'un clic, jamais automatiques ; la réparation remplace l'original une fois la copie vérifiée (choix provisoires, à confirmer) |
+| 2026-10-22 | Réglages : version précédente et cinq sauvegardes quotidiennes, restauration automatique d'un fichier abîmé ou vide |
+| 2026-10-22 | Une seule copie de Polyptyque par session Windows ; dossier de secours `Vidéos\Polyptyque` si le dossier choisi devient inaccessible |
+| 2026-10-22 | Version portable : données dans `données` à la racine du dossier décompressé, hors du dossier `current` que les mises à jour remplacent |
 
 ---
 

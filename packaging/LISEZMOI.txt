@@ -12,6 +12,16 @@ nouvelles versions sont proposées d'un clic dans Polyptyque. La
 désinstallation (Paramètres de Windows > Applications) conserve scènes,
 réglages et connexions des navigateurs.
 
+Version portable
+----------------
+Polyptyque-portable.zip s'utilise sans installation : le décompresser où
+l'on veut (disque, clé USB), puis lancer polyptyque.exe. Scènes, réglages,
+connexions des navigateurs et journaux sont rangés dans le sous-dossier
+« données » : déplacer le dossier, ou le copier sur un autre PC, emporte
+tout. Les enregistrements vont dans le dossier choisi dans les réglages
+(Vidéos\Polyptyque si ce dossier n'existe pas sur ce PC). Les réglages
+affichent « portable » à côté du numéro de version.
+
 Contenu
 -------
 - polyptyque.exe         : Polyptyque, avec son interface
@@ -77,9 +87,15 @@ Confidentialité et sécurité > Microphone.
 À savoir
 --------
 - Une fenêtre réduite dans la barre des tâches ne se filme plus (image
-  figée). Une fenêtre cachée derrière une autre se filme normalement.
+  figée) : le bouton « Rétablir la fenêtre » de sa carte la fait revenir, et
+  la replace sur l'écran principal si son écran a été débranché. Une fenêtre
+  cachée derrière une autre se filme normalement.
 - Si une fenêtre se ferme pendant l'enregistrement, l'image devient noire et
-  la source est rattachée automatiquement dès que la fenêtre revient.
+  la source est rattachée automatiquement dès que la fenêtre revient. Le
+  bouton « Rouvrir la fenêtre » relance le programme ; un navigateur (ou une
+  application avec « Relancer ») est rouvert tout seul au bout de 20 s.
+- Si le dossier d'enregistrement devient inaccessible (disque externe
+  débranché), la suite est enregistrée dans Vidéos\Polyptyque.
 - La mise en veille automatique est empêchée pendant l'enregistrement. Une
   mise en veille demandée (capot fermé, bouton, menu) reste possible : à
   éviter pendant un enregistrement.
@@ -91,10 +107,17 @@ Confidentialité et sécurité > Microphone.
 - Si l'encodeur s'arrête en cours de route, Polyptyque le relance tout seul :
   la suite est dans un fichier « …_partie2.mkv » (environ une seconde
   perdue entre les deux).
+- Après un plantage ou une coupure de courant pendant un enregistrement,
+  Polyptyque fait le bilan des fichiers au lancement suivant. Il propose de
+  réparer ceux qui ont été coupés net (sans perte de qualité) et de
+  reprendre l'enregistrement.
+- Un seul Polyptyque peut être ouvert à la fois : le relancer ramène la
+  fenêtre déjà ouverte.
 
 En cas de problème
 ------------------
 Les journaux sont dans :
   %LOCALAPPDATA%\Polyptyque\journaux
-(copier ce chemin dans la barre d'adresse de l'Explorateur).
+(copier ce chemin dans la barre d'adresse de l'Explorateur), ou dans
+données\journaux pour la version portable.
 Chaque enregistrement a son dossier « session_… » avec un journal par source.

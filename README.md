@@ -46,9 +46,13 @@ Polyptyque fait l'inverse : **chaque fenêtre est enregistrée à part**, dans s
 - Conversion en MP4 sans perte de qualité, pour Premiere Pro et les autres logiciels qui gèrent mal le MKV.
 
 **Pensé pour les longues sessions**
+- Testé sur 14 h 15 d'enregistrement continu avec trois sources : aucune coupure, fichiers calés à quelques millisecondes près, mémoire stable.
 - Fichiers écrits au fil de l'eau : un plantage ne fait perdre qu'environ une seconde, et un fichier coupé net (panne de courant) reste lisible.
+- Après un plantage ou une coupure de courant, Polyptyque fait le bilan des fichiers au lancement suivant, propose de réparer ceux qui ont été coupés net (sans perte de qualité) et de reprendre l'enregistrement.
 - Si l'encodeur s'arrête ou se fige, Polyptyque le relance seul, dans un nouveau fichier, sans interrompre les autres sources.
-- Une fenêtre fermée ou plantée donne une image noire, puis est rattachée automatiquement dès qu'elle revient.
+- Une fenêtre fermée ou plantée donne une image noire, puis est rattachée automatiquement dès qu'elle revient. Un navigateur fermé par erreur est rouvert tout seul ; une fenêtre réduite revient d'un clic, même si son écran a été débranché.
+- Disque externe débranché en cours de route : la suite est enregistrée dans `Vidéos\Polyptyque`.
+- Réglages protégés : version précédente et sauvegarde quotidienne, restaurées automatiquement si le fichier est abîmé.
 - Espace disque surveillé, avec arrêt propre s'il vient à manquer. Mise en veille automatique empêchée (une mise en veille demandée, capot fermé par exemple, reste possible).
 - Si Windows s'éteint ou se déconnecte pendant un enregistrement, il le signale et laisse annuler ; sinon, les fichiers sont finalisés avant la fermeture.
 
@@ -89,7 +93,7 @@ Polyptyque doit tourner pendant des heures à côté d'un jeu, d'un appel vidéo
 
 **Mises à jour**
 
-Polyptyque vérifie au démarrage si une nouvelle version existe et la propose d'un clic, jamais pendant un enregistrement. Cette vérification peut être désactivée dans les réglages.
+Polyptyque vérifie au démarrage, puis toutes les six heures, si une nouvelle version existe et la propose d'un clic, jamais pendant un enregistrement. Cette vérification peut être désactivée dans les réglages.
 
 **Désinstaller**
 
@@ -97,7 +101,9 @@ Paramètres de Windows > Applications. Les scènes, les réglages et les connexi
 
 **Version portable**
 
-`Polyptyque-portable.zip` s'utilise sans installation : décompresser, puis lancer `polyptyque.exe`.
+`Polyptyque-portable.zip` s'utilise sans installation : décompresser où l'on veut (disque, clé USB), puis lancer `polyptyque.exe`.
+- Scènes, réglages, connexions des navigateurs et journaux sont rangés dans le sous-dossier `données`. Rien n'est écrit ailleurs sur le PC : déplacer le dossier, ou le copier sur un autre PC, emporte tout.
+- Les enregistrements vont dans le dossier choisi dans les réglages, ou dans `Vidéos\Polyptyque` si ce dossier n'existe pas sur ce PC.
 
 ## Prise en main
 
@@ -120,6 +126,7 @@ Paramètres de Windows > Applications. Les scènes, les réglages et les connexi
 - **MKV ou MP4** : pendant l'enregistrement, Polyptyque écrit en MKV, un format qui reste lisible même après une coupure. « Convertir en MP4… » crée une copie MP4 à côté, sans perte de qualité, et la conversion peut être automatique en fin d'enregistrement. Le MKV est conservé ; prévoir le double d'espace disque.
 - **Micro** : son fichier `…_Micro.mka` devient `…_Micro.m4a` après conversion.
 - **Parties** : si l'encodeur a été relancé, la suite d'une source se trouve dans `…_partie2.mkv`, à placer juste après la première partie.
+- **Fichier coupé net** (coupure de courant) : il se lit, mais sans durée ni index. La réparation proposée au lancement suivant les reconstruit sans réencodage ; la conversion en MP4 le fait aussi.
 - **Source ajoutée en cours de route** : son fichier commence à l'heure indiquée dans son nom.
 
 ## Limites connues

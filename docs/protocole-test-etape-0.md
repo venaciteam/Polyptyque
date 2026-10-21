@@ -9,6 +9,9 @@ type: guide
 
 # Polyptyque - Protocole de test de l'étape 0
 
+> [!warning] Document historique
+> Ce protocole concerne le prototype en console de l'étape 0 (2026-10-20). Depuis, `polyptyque.exe` est l'interface graphique, la console s'appelle `polyptyque-console.exe`, et la fabrication livre l'artefact `Polyptyque-windows` (installateur et zip portable). Pour les tests actuels, voir [[protocole-test-2026-10-22]].
+
 > [!abstract] Résumé
 > Tests à mener sur la machine de référence (Windows 11, RTX 3080) pour valider le prototype du moteur : son isolé par fenêtre, reconnaissance des fenêtres, charge, puis endurance de 12 h. Chaque test indique quoi faire, quoi observer et quoi transmettre en retour.
 
