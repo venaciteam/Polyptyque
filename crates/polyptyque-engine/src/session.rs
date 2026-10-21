@@ -275,6 +275,11 @@ impl Session {
         }
     }
 
+    /// Fenêtre que suit la source `id` pendant son enregistrement.
+    pub fn tracked_window(&self, id: &str) -> Option<polyptyque_core::platform::WindowHandle> {
+        self.sources.iter().find(|s| s.id == id && s.recording()).and_then(|s| s.shared.target_handle())
+    }
+
     pub fn is_recording(&self, id: &str) -> bool {
         self.sources.iter().any(|s| s.id == id && s.recording())
     }
@@ -446,15 +451,17 @@ impl Session {
         bytes_per_hour(self.settings.video.bitrate_kbps, audio) * self.recording_count() as u64 + microphone
     }
 
-    /// Espace libre là où s'écrivent les fichiers (le dossier de secours si
-    /// le dossier choisi est devenu inaccessible).
-    pub fn free_space(&self) -> Option<u64> {
-        let dir = self
-            .files_in_progress()
+    /// Dossier où s'écrivent les fichiers : le dossier choisi, ou celui de
+    /// secours s'il est devenu inaccessible.
+    pub fn current_output_dir(&self) -> PathBuf {
+        self.files_in_progress()
             .last()
             .and_then(|f| f.parent().map(Path::to_path_buf))
-            .unwrap_or_else(|| self.settings.output_dir.clone());
-        self.platform.free_disk_space(&dir)
+            .unwrap_or_else(|| self.settings.output_dir.clone())
+    }
+
+    pub fn free_space(&self) -> Option<u64> {
+        self.platform.free_disk_space(&self.current_output_dir())
     }
 
     pub fn status(&mut self) -> Vec<SourceStatus> {

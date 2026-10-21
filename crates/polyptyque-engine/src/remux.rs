@@ -113,6 +113,7 @@ pub fn repair(
     log::info!("réparation : {}", input.display());
     let repaired = storage::sibling(input, ".reparation");
     let result = remux_file(platform, ffmpeg, input, &repaired, Container::Matroska, on_progress, cancel)
+        .and_then(|()| check_repaired_size(input, &repaired))
         .and_then(|()| replace_with(input, &repaired));
     match result {
         Ok(()) => {
@@ -126,6 +127,22 @@ pub fn repair(
         }
     }
 }
+
+/// Un fichier interrompu n'a pas de durée : la vérification des pistes ne
+/// suffit pas. La copie doit aussi contenir presque toutes les données de
+/// l'original (FFmpeg peut s'arrêter sur une zone abîmée sans le signaler) :
+/// sinon l'original est gardé.
+fn check_repaired_size(original: &Path, repaired: &Path) -> Result<()> {
+    let before = fs::metadata(original).map(|m| m.len()).unwrap_or(0);
+    let after = fs::metadata(repaired).map(|m| m.len()).unwrap_or(0);
+    if after < before / 100 * MIN_REPAIRED_PERCENT {
+        bail!("copie réparée incomplète ({after} octets sur {before}) : l'original est conservé tel quel");
+    }
+    Ok(())
+}
+
+/// Part minimale des données de l'original retrouvée dans la copie réparée.
+const MIN_REPAIRED_PERCENT: u64 = 95;
 
 /// Remplace `original` par `replacement`, en remettant l'original en place
 /// si le second renommage échoue.
@@ -361,6 +378,20 @@ At least one output file must be specified";
         // Un MKV interrompu sans durée reste convertible.
         let unknown = MediaInfo { duration: None, ..source.clone() };
         assert!(verify(&unknown, &same).is_ok());
+    }
+
+    #[test]
+    fn truncated_repair_is_rejected() {
+        let dir = std::env::temp_dir().join(format!("polyptyque-reparation-{}", polyptyque_core::config::new_id()));
+        fs::create_dir_all(&dir).unwrap();
+        let original = dir.join("a.mkv");
+        let repaired = dir.join("a.mkv.reparation");
+        fs::write(&original, vec![0u8; 10_000]).unwrap();
+        fs::write(&repaired, vec![0u8; 9_800]).unwrap();
+        assert!(check_repaired_size(&original, &repaired).is_ok());
+        fs::write(&repaired, vec![0u8; 5_000]).unwrap();
+        assert!(check_repaired_size(&original, &repaired).is_err());
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

@@ -173,6 +173,10 @@ impl Shared {
         lock(&self.target).as_ref().map(|w| w.pid)
     }
 
+    pub fn target_handle(&self) -> Option<polyptyque_core::platform::WindowHandle> {
+        lock(&self.target).as_ref().map(|w| w.handle)
+    }
+
     pub fn target_generation(&self) -> u64 {
         self.target_generation.load(Ordering::SeqCst)
     }
@@ -241,6 +245,9 @@ impl Shared {
 /// Relances d'un fil de capture après une erreur interne, au-delà
 /// desquelles la source passe en erreur.
 const MAX_TASK_RESTARTS: u32 = 3;
+/// Un fil qui a tourné sans erreur aussi longtemps repart avec un compteur
+/// de relances à zéro.
+const RESTART_FORGET_AFTER: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// Exécute `task` en le relançant s'il s'arrête sur une erreur interne
 /// (le détail est déjà dans le journal, par le gestionnaire de paniques) :
@@ -248,7 +255,15 @@ const MAX_TASK_RESTARTS: u32 = 3;
 /// autres. `task` doit reprendre là où il s'était arrêté.
 pub(crate) fn run_protected(shared: &Shared, name: &str, what: &str, mut task: impl FnMut()) {
     let mut restarts = 0;
-    while std::panic::catch_unwind(std::panic::AssertUnwindSafe(&mut task)).is_err() {
+    loop {
+        let started = std::time::Instant::now();
+        if std::panic::catch_unwind(std::panic::AssertUnwindSafe(&mut task)).is_ok() {
+            return;
+        }
+        // Des erreurs isolées, espacées, ne s'additionnent pas.
+        if started.elapsed() >= RESTART_FORGET_AFTER {
+            restarts = 0;
+        }
         restarts += 1;
         if restarts > MAX_TASK_RESTARTS || shared.stop_at().is_some() {
             shared.fail(format!("[{name}] erreur interne répétée dans {what} (voir le journal)"));

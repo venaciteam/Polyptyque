@@ -79,6 +79,15 @@ enum Confirm {
     /// veille.
     #[cfg_attr(not(windows), allow(dead_code))]
     ResumeAfterSleep(String),
+    /// Réparer ces fichiers mal fermés.
+    RepairFiles(Vec<PathBuf>),
+}
+
+/// Fenêtre à montrer dès que l'interface est libre (aucun enregistrement,
+/// aucune autre fenêtre ouverte).
+enum Deferred {
+    Incident(Option<SessionRecord>, Vec<(PathBuf, FileReport)>),
+    Repair(Vec<PathBuf>),
 }
 
 /// Où en est la mise à jour proposée.
@@ -163,6 +172,10 @@ pub struct App {
     /// décision (réparer, reprendre).
     incident: RefCell<Option<Incident>>,
     incident_files: Rc<VecModel<IncidentFile>>,
+    /// Réparations proposées par un bilan, à lancer à la fin de
+    /// l'enregistrement démarré entre-temps.
+    pending_repairs: RefCell<Vec<PathBuf>>,
+    deferred: RefCell<Vec<Deferred>>,
     /// Micros proposés dans les réglages : identifiant et nom.
     mic_choices: RefCell<Vec<(String, String)>>,
     /// Un problème de micro a déjà été signalé pendant cet enregistrement.
@@ -276,6 +289,8 @@ pub fn run(platform: Arc<dyn Platform>, paths: Paths, initial: Option<Config>) -
         session_record: RefCell::new(None),
         incident: RefCell::new(None),
         incident_files: Rc::new(VecModel::default()),
+        pending_repairs: RefCell::new(Vec::new()),
+        deferred: RefCell::new(Vec::new()),
         mic_choices: RefCell::new(Vec::new()),
         mic_warned: Cell::new(false),
         update: RefCell::new(None),
@@ -606,11 +621,25 @@ impl App {
         }
         self.last_disk_check.set(Some(Instant::now()));
         self.disk_check_running.set(true);
-        let config = self.config.borrow();
-        let sources = config.active_scene().sources.len().max(1) as u64;
-        let per_hour = bytes_per_hour(config.settings.video.bitrate_kbps, config.settings.audio.bitrate_kbps) * sources;
-        let dir = config.settings.output_dir.clone();
-        drop(config);
+        // Pendant un enregistrement : le dossier réellement utilisé (celui de
+        // secours si le dossier choisi est devenu inaccessible).
+        let recording = self
+            .session
+            .try_borrow()
+            .ok()
+            .and_then(|s| s.as_ref().map(|s| (s.current_output_dir(), s.bytes_per_hour())));
+        let (dir, per_hour) = match recording {
+            Some(state) => state,
+            None => {
+                let config = self.config.borrow();
+                let sources = config.active_scene().sources.len().max(1) as u64;
+                let video = config.settings.video.bitrate_kbps;
+                (
+                    config.settings.output_dir.clone(),
+                    bytes_per_hour(video, config.settings.audio.bitrate_kbps) * sources,
+                )
+            }
+        };
         let platform = self.platform.clone();
         thread::spawn(move || {
             let free = platform.free_disk_space(&dir);
@@ -774,6 +803,7 @@ impl App {
 
     /// Démarre toutes les sources de la scène, ou une seule (`only`).
     fn start_recording(&self, only: Option<&str>) {
+        self.keep_incident_repairs();
         let config = self.config.borrow().clone();
         let mut scene = config.active_scene().clone();
         if let Some(id) = only {
@@ -781,6 +811,7 @@ impl App {
         }
         if scene.sources.is_empty() {
             self.toast("Ajoute d'abord au moins une source à cette scène.", 2);
+            self.flush_pending_repairs();
             return;
         }
         self.close_sheet();
@@ -803,6 +834,8 @@ impl App {
             Ok(prepared) => prepared,
             Err(e) => {
                 self.toast(&format!("Impossible de démarrer : {e:#}"), 3);
+                self.flush_pending_repairs();
+                self.show_next_deferred();
                 return;
             }
         };
@@ -885,7 +918,11 @@ impl App {
                     );
                 }
             }
-            Err(e) => self.toast(&format!("Impossible de démarrer : {e:#}"), 3),
+            Err(e) => {
+                self.toast(&format!("Impossible de démarrer : {e:#}"), 3);
+                self.flush_pending_repairs();
+                self.show_next_deferred();
+            }
         }
     }
 
@@ -1019,8 +1056,8 @@ impl App {
         if clean {
             self.clear_session_record();
         } else {
-            // Fichiers peut-être mal fermés : le bilan sera proposé au
-            // prochain lancement.
+            // Arrêt en erreur : fichiers peut-être mal fermés. Le journal est
+            // gardé, et le bilan proposé juste après.
             self.session_record.borrow_mut().take();
         }
         self.set_shutdown_block(false);
@@ -1070,6 +1107,15 @@ impl App {
         } else {
             self.toast(&format!("{message} Problèmes : {}", errors.join(" · ")), 3);
         }
+        self.flush_pending_repairs();
+        if clean {
+            let files: Vec<PathBuf> =
+                summaries.iter().flat_map(|s| s.outputs.iter().filter(|p| p.exists()).cloned()).collect();
+            self.check_unfinalized(files);
+        } else {
+            self.check_interrupted_session();
+        }
+        self.show_next_deferred();
     }
 
     fn tick_status(&self) {
@@ -1078,6 +1124,8 @@ impl App {
         let statuses: (Vec<SourceStatus>, Vec<PathBuf>) = {
             let mut session = self.session.borrow_mut();
             let Some(session) = session.as_mut() else {
+                // Emprunt rendu avant : la mesure du disque relit la session.
+                drop(session);
                 self.refresh_disk(false);
                 return;
             };
@@ -1183,22 +1231,37 @@ impl App {
             let Some(source) = source.filter(Source::should_launch) else {
                 continue;
             };
-            if resolve::profile_in_use(&source) {
-                // Firefox se ferme ou redémarre encore : on réessaiera.
-                continue;
-            }
             if let Some(entry) = self.lost_windows.borrow_mut().get_mut(&id) {
                 entry.tries += 1;
                 entry.session_tries += 1;
                 entry.last_try = Some(now);
             }
-            match resolve::launch(&source) {
-                Ok(()) => {
-                    log::info!("[{}] fenêtre perdue : programme rouvert automatiquement", source.name);
-                    self.toast(&format!("La fenêtre de « {} » a disparu : réouverture automatique.", source.name), 2);
+            // Hors du fil de l'interface : la recherche des fenêtres interroge
+            // chaque processus.
+            let platform = self.platform.clone();
+            thread::spawn(move || {
+                let windows = platform.list_windows();
+                if resolve::find_window(platform.as_ref(), &source, &windows).is_some() {
+                    // La fenêtre existe (capture refusée, par exemple) : la
+                    // relancer en ouvrirait une seconde.
+                    return;
                 }
-                Err(e) => log::warn!("[{}] réouverture automatique impossible : {e:#}", source.name),
-            }
+                if resolve::profile_in_use(&source) {
+                    // Firefox se ferme ou redémarre encore : on réessaiera.
+                    return;
+                }
+                let result = resolve::launch(&source);
+                post(move |app| match result {
+                    Ok(()) => {
+                        log::info!("[{}] fenêtre perdue : programme rouvert automatiquement", source.name);
+                        app.toast(
+                            &format!("La fenêtre de « {} » a disparu : réouverture automatique.", source.name),
+                            2,
+                        );
+                    }
+                    Err(e) => log::warn!("[{}] réouverture automatique impossible : {e:#}", source.name),
+                });
+            });
         }
     }
 
@@ -1258,11 +1321,75 @@ impl App {
     }
 
     fn show_incident(&self, record: Option<SessionRecord>, reports: Vec<(PathBuf, FileReport)>) {
-        if self.recording() || self.busy.get() {
-            // Un nouvel enregistrement a déjà commencé : son journal a remplacé
-            // l'ancien.
+        self.deferred.borrow_mut().push(Deferred::Incident(record, reports));
+        self.show_next_deferred();
+    }
+
+    /// Montre la prochaine fenêtre en attente, si l'interface est libre : un
+    /// bilan n'interrompt ni un enregistrement ni une fenêtre ouverte (des
+    /// réglages en cours de saisie, par exemple).
+    fn show_next_deferred(&self) {
+        let sheet_open = self.with_bridge_value(|b| !b.get_sheet().is_empty());
+        if sheet_open || self.recording() || self.busy.get() || self.deferred.borrow().is_empty() {
             return;
         }
+        match self.deferred.borrow_mut().remove(0) {
+            Deferred::Incident(record, reports) => self.present_incident(record, reports),
+            Deferred::Repair(files) => self.ask(
+                Confirm::RepairFiles(files.clone()),
+                "Fichiers à réparer",
+                &format!(
+                    "{} fichier(s) n'ont pas été fermés correctement (encodeur arrêté de force). Ils se lisent, mais sans durée ni index. Les réparer maintenant, sans perte de qualité ?",
+                    files.len()
+                ),
+                "Réparer",
+            ),
+        }
+    }
+
+    /// Un enregistrement démarre alors que le bilan d'un enregistrement
+    /// interrompu est affiché : ses réparations attendent la fin du nouvel
+    /// enregistrement plutôt que d'être oubliées.
+    fn keep_incident_repairs(&self) {
+        if let Some(incident) = self.incident.borrow_mut().as_mut() {
+            self.pending_repairs.borrow_mut().append(&mut incident.repair);
+        }
+    }
+
+    fn flush_pending_repairs(&self) {
+        let files = std::mem::take(&mut *self.pending_repairs.borrow_mut());
+        if !files.is_empty() {
+            self.enqueue_jobs(files, JobKind::Repair);
+        }
+    }
+
+    /// Après un arrêt normal : un fichier dont l'encodeur a été arrêté de
+    /// force (figé, trop lent à finir) n'a ni durée ni index. Hors du fil de
+    /// l'interface, chaque fichier est examiné, et la réparation proposée.
+    fn check_unfinalized(&self, files: Vec<PathBuf>) {
+        if files.is_empty() {
+            return;
+        }
+        let platform = self.platform.clone();
+        thread::spawn(move || {
+            let reports =
+                catch_unwind(AssertUnwindSafe(|| inspect_interrupted(platform.as_ref(), &files))).unwrap_or_default();
+            let cut: Vec<PathBuf> = reports
+                .into_iter()
+                .filter(|(_, report)| matches!(report, FileReport::NeedsRepair { .. }))
+                .map(|(path, _)| path)
+                .collect();
+            if !cut.is_empty() {
+                post(move |app| {
+                    log::warn!("{} fichier(s) mal fermé(s) à l'arrêt : réparation proposée", cut.len());
+                    app.deferred.borrow_mut().push(Deferred::Repair(cut));
+                    app.show_next_deferred();
+                });
+            }
+        });
+    }
+
+    fn present_incident(&self, record: Option<SessionRecord>, reports: Vec<(PathBuf, FileReport)>) {
         for (path, report) in &reports {
             log::info!("fichier de l'enregistrement interrompu : {} : {}", path.display(), report_text(report));
         }
@@ -1333,6 +1460,7 @@ impl App {
 
     fn incident_resume(&self) {
         let scene_id = self.incident.borrow().as_ref().and_then(|i| i.scene_id.clone());
+        self.keep_incident_repairs();
         self.close_sheet();
         if let Some(id) = scene_id {
             if self.config.borrow().active_scene != id {
@@ -1997,11 +2125,21 @@ impl App {
         let Some(source) = source else {
             return;
         };
+        // Pendant l'enregistrement : la fenêtre suivie par le moteur. Sinon,
+        // parmi celles qui correspondent, une fenêtre réduite d'abord.
+        let tracked = self.session.borrow().as_ref().and_then(|s| s.tracked_window(&source.id));
         let platform = self.platform.clone();
         thread::spawn(move || {
-            let windows = platform.list_windows();
-            let result = match resolve::find_window(platform.as_ref(), &source, &windows) {
-                Some(window) => platform.restore_window(window.handle),
+            let handle = tracked.or_else(|| {
+                let windows = platform.list_windows();
+                let minimized: Vec<WindowInfo> =
+                    windows.iter().filter(|w| platform.is_window_minimized(w.handle)).cloned().collect();
+                resolve::find_window(platform.as_ref(), &source, &minimized)
+                    .or_else(|| resolve::find_window(platform.as_ref(), &source, &windows))
+                    .map(|w| w.handle)
+            });
+            let result = match handle {
+                Some(handle) => platform.restore_window(handle),
                 None => Err(anyhow!("fenêtre introuvable")),
             };
             post(move |app| match result {
@@ -2262,10 +2400,14 @@ impl App {
             b.set_sheet("".into());
             b.set_settings_error("".into());
         });
+        if !self.deferred.borrow().is_empty() {
+            // Après l'action en cours (qui démarre peut-être un enregistrement).
+            post(|app| app.show_next_deferred());
+        }
     }
 
     fn ask(&self, action: Confirm, title: &str, text: &str, button: &str) {
-        let danger = !matches!(action, Confirm::InstallUpdate | Confirm::ResumeAfterSleep(_));
+        let danger = !matches!(action, Confirm::InstallUpdate | Confirm::ResumeAfterSleep(_) | Confirm::RepairFiles(_));
         *self.confirm.borrow_mut() = Some(action);
         self.with_bridge(|b| {
             b.set_confirm_danger(danger);
@@ -2302,6 +2444,7 @@ impl App {
                 self.restart_previews();
             }
             Some(Confirm::InstallUpdate) => self.download_update(),
+            Some(Confirm::RepairFiles(files)) => self.enqueue_jobs(files, JobKind::Repair),
             Some(Confirm::ResumeAfterSleep(scene_id)) => {
                 if !self.recording() && !self.busy.get() {
                     if self.config.borrow().active_scene != scene_id

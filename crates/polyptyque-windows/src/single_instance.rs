@@ -7,7 +7,7 @@ use std::path::Path;
 use windows::core::w;
 use windows::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, HANDLE};
 use windows::Win32::System::Threading::CreateMutexW;
-use windows::Win32::UI::WindowsAndMessaging::{IsIconic, SetForegroundWindow, ShowWindow, SW_RESTORE, SW_SHOW};
+use windows::Win32::UI::WindowsAndMessaging::{IsIconic, SetForegroundWindow, ShowWindowAsync, SW_RESTORE, SW_SHOW};
 
 use crate::windows_list;
 
@@ -64,7 +64,8 @@ fn show_existing() {
     };
     let hwnd = windows_list::hwnd(window.handle);
     unsafe {
-        let _ = ShowWindow(hwnd, if IsIconic(hwnd).as_bool() { SW_RESTORE } else { SW_SHOW });
+        // Sans attendre : une copie figée ne doit pas bloquer celle-ci.
+        let _ = ShowWindowAsync(hwnd, if IsIconic(hwnd).as_bool() { SW_RESTORE } else { SW_SHOW });
         let _ = SetForegroundWindow(hwnd);
     }
 }

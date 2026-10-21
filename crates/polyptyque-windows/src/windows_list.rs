@@ -11,9 +11,10 @@ use windows::Win32::Graphics::Gdi::{
     GetMonitorInfoW, MonitorFromPoint, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONULL, MONITOR_DEFAULTTOPRIMARY,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetClassNameW, GetWindow, GetWindowLongW, GetWindowRect, GetWindowTextW, GetWindowThreadProcessId,
-    IsIconic, IsWindow, IsWindowVisible, SetWindowPos, ShowWindow, GWL_EXSTYLE, GW_OWNER, SWP_NOACTIVATE, SWP_NOZORDER,
-    SW_SHOWNOACTIVATE, WS_EX_TOOLWINDOW,
+    EnumWindows, GetClassNameW, GetWindow, GetWindowLongW, GetWindowPlacement, GetWindowRect, GetWindowTextW,
+    GetWindowThreadProcessId, IsIconic, IsWindow, IsWindowVisible, SetWindowPos, ShowWindow, GWL_EXSTYLE, GW_OWNER,
+    SWP_NOACTIVATE, SWP_NOZORDER, SW_SHOWMAXIMIZED, SW_SHOWNOACTIVATE, WINDOWPLACEMENT, WPF_RESTORETOMAXIMIZED,
+    WS_EX_TOOLWINDOW,
 };
 
 use crate::process;
@@ -116,7 +117,14 @@ pub fn restore(handle: WindowHandle) -> Result<()> {
             bail!("la fenêtre n'existe plus");
         }
         if IsIconic(window).as_bool() {
-            let _ = ShowWindow(window, SW_SHOWNOACTIVATE);
+            let mut placement =
+                WINDOWPLACEMENT { length: std::mem::size_of::<WINDOWPLACEMENT>() as u32, ..Default::default() };
+            let maximized =
+                GetWindowPlacement(window, &mut placement).is_ok() && placement.flags.0 & WPF_RESTORETOMAXIMIZED.0 != 0;
+            // Réduite depuis le plein écran : elle y revient, en prenant le
+            // focus (Windows n'agrandit pas une fenêtre sans l'activer). Sinon
+            // elle revient à sa taille, sans prendre le focus.
+            let _ = ShowWindow(window, if maximized { SW_SHOWMAXIMIZED } else { SW_SHOWNOACTIVATE });
         }
         if !MonitorFromWindow(window, MONITOR_DEFAULTTONULL).is_invalid() {
             return Ok(());
