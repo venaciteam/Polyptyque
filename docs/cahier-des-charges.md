@@ -535,6 +535,7 @@ Seule une implémentation de `Platform` est à écrire pour chaque système (`po
 > - [x] README complet
 > - [ ] Validation sur la machine de référence
 > - [ ] Version portable autonome (tout dans son dossier), après les tests de fiabilité
+> - [ ] Bouton « Rétablir la fenêtre » sur une carte « Réduite » : la fenêtre revient et se replace sur un écran branché (cas vu en test : écran débranché pendant l'enregistrement)
 
 > [!todo] Étape 4 - Publication
 > - [ ] Dépôt public, première version publiée
@@ -587,6 +588,7 @@ Seule une implémentation de `Platform` est à écrire pour chaque système (`po
 | 2026-10-20 | Mises à jour détectées et proposées d'un clic, jamais pendant un enregistrement ; dépôt rendu public quand tout sera prêt |
 | 2026-10-21 | Version portable autonome : tout dans le dossier de Polyptyque sauf les enregistrements, pour changer de PC sans rien perdre ; à faire après les tests de fiabilité |
 | 2026-10-21 | Recherche du meilleur encodeur conservée à chaque démarrage d'enregistrement (garantit un encodeur fonctionnel, environ une seconde) |
+| 2026-10-21 | Test d'endurance : écran débranché pendant l'enregistrement, fenêtres vues « Réduites » (image figée, son conservé), reprise normale ensuite. Ajout prévu d'un bouton « Rétablir la fenêtre » |
 
 ---
 
