@@ -410,7 +410,7 @@ fn resume_positions(video_frames: u64, audio_bytes: u64, fps: u32) -> (u64, u64)
     (start_frame, start_sample * frame_bytes)
 }
 
-fn clock(seconds: u64) -> String {
+pub(crate) fn clock(seconds: u64) -> String {
     format!("{:02}:{:02}:{:02}", seconds / 3600, seconds / 60 % 60, seconds % 60)
 }
 

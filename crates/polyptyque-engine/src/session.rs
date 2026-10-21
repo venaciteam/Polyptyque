@@ -11,14 +11,14 @@ use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
 use crossbeam_channel::unbounded;
-use polyptyque_core::config::{new_id, Settings, Source};
+use polyptyque_core::config::{new_id, Settings, Source, CHANNELS, SAMPLE_RATE};
 use polyptyque_core::encoder::{bytes_per_hour, EncoderChoice};
 use polyptyque_core::naming::{self, NameParts};
 use polyptyque_core::platform::{Nv12Frame, Platform};
 use polyptyque_core::timeline::HNS_PER_SEC;
 
 use crate::audio_task::{AudioInput, AudioTask};
-use crate::output::{OutputPlan, OutputTask};
+use crate::output::{clock, OutputPlan, OutputTask};
 use crate::shared::{Shared, SourceState};
 use crate::video_task::VideoTask;
 
@@ -137,7 +137,7 @@ impl SourceRuntime {
                 let _ = output.join();
             }
             shared.mark_done();
-            log::info!("[{name}] fichier(s) finalisé(s)");
+            log::info!("[{name}] fichier(s) finalisé(s) ; {}", summary_line(&shared));
         };
         match thread::Builder::new().name(format!("{}-finalisation", self.name)).spawn(finish) {
             Ok(handle) => self.finisher = Some(handle),
@@ -458,6 +458,29 @@ impl Session {
         all.sort_by_key(|s| s.order);
         all.into_iter().map(SourceRuntime::summary).collect()
     }
+}
+
+/// Bilan d'une source pour le journal : durée, fichiers, taille, images.
+fn summary_line(shared: &Shared) -> String {
+    let outputs = shared.outputs();
+    let bytes_per_second = CHANNELS as u64 * 4 * SAMPLE_RATE as u64;
+    let seconds = shared.audio_position.load(Ordering::SeqCst) / bytes_per_second;
+    let bytes = total_size(&outputs) as f64;
+    let size = if bytes >= 1e9 { format!("{:.1} Go", bytes / 1e9) } else { format!("{:.0} Mo", bytes / 1e6) };
+    let size = size.replace('.', ",");
+    let mut line = format!("bilan : {} enregistrées, {} fichier(s), {size}", clock(seconds), outputs.len());
+    let frames = shared.frames_total.load(Ordering::Relaxed);
+    if frames > 0 {
+        line.push_str(&format!(
+            ", images : {frames} écrites, {} perdues, {} reçues de la fenêtre",
+            shared.frames_dropped.load(Ordering::Relaxed),
+            shared.frames_new.load(Ordering::Relaxed)
+        ));
+    }
+    if let Some(error) = shared.error() {
+        line.push_str(&format!(" ; dernier message : {error}"));
+    }
+    line
 }
 
 fn total_size(outputs: &[PathBuf]) -> u64 {

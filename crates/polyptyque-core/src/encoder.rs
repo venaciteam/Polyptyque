@@ -119,10 +119,7 @@ pub fn recording_args(spec: &RecordingSpec) -> Vec<String> {
     args.push(spec.video_input.into());
 
     // Son brut, flottant 32 bits entrelacé.
-    args.extend(strings(&["-f", "f32le", "-ar"]));
-    args.push(spec.sample_rate.to_string());
-    args.push("-ac".into());
-    args.push(spec.channels.to_string());
+    args.extend(raw_audio_format(spec.sample_rate, spec.channels));
     args.extend(raw_input_tuning());
     args.push("-i".into());
     args.push(spec.audio_input.into());
@@ -174,10 +171,8 @@ pub struct AudioRecordingSpec<'a> {
 
 /// Arguments d'un enregistrement de son seul (micro), en Matroska audio.
 pub fn audio_recording_args(spec: &AudioRecordingSpec) -> Vec<String> {
-    let mut args = strings(&["-hide_banner", "-nostdin", "-loglevel", "warning", "-f", "f32le", "-ar"]);
-    args.push(spec.sample_rate.to_string());
-    args.push("-ac".into());
-    args.push(spec.channels.to_string());
+    let mut args = strings(&["-hide_banner", "-nostdin", "-loglevel", "warning"]);
+    args.extend(raw_audio_format(spec.sample_rate, spec.channels));
     args.extend(raw_input_tuning());
     args.push("-i".into());
     args.push(spec.input.into());
@@ -187,6 +182,26 @@ pub fn audio_recording_args(spec: &AudioRecordingSpec) -> Vec<String> {
     args.push(format!("title={}", spec.title));
     args.extend(matroska_output());
     args.push(spec.output.to_string_lossy().into_owned());
+    args
+}
+
+/// Format d'un son brut flottant 32 bits entrelacé. La disposition des
+/// canaux est donnée explicitement : sinon FFmpeg la devine et le signale
+/// dans le journal.
+fn raw_audio_format(sample_rate: u32, channels: u16) -> Vec<String> {
+    let mut args = strings(&["-f", "f32le", "-ar"]);
+    args.push(sample_rate.to_string());
+    args.push("-ac".into());
+    args.push(channels.to_string());
+    let layout = match channels {
+        1 => Some("mono"),
+        2 => Some("stereo"),
+        _ => None,
+    };
+    if let Some(layout) = layout {
+        args.push("-ch_layout".into());
+        args.push(layout.into());
+    }
     args
 }
 
@@ -263,7 +278,7 @@ mod tests {
         let args = recording_args(&spec);
         let joined = args.join(" ");
         assert!(joined.contains("-f rawvideo -pix_fmt nv12 -video_size 1920x1080 -framerate 60"));
-        assert!(joined.contains("-f f32le -ar 48000 -ac 2"));
+        assert!(joined.contains("-f f32le -ar 48000 -ac 2 -ch_layout stereo"));
         assert!(joined.contains("-c:v h264_nvenc"));
         assert!(joined.contains("-b:v 12000k -maxrate 12000k -bufsize 24000k"));
         assert!(joined.contains("-g 120"));
@@ -290,7 +305,7 @@ mod tests {
             output: &output,
         });
         let joined = args.join(" ");
-        assert!(joined.contains("-f f32le -ar 48000 -ac 2"));
+        assert!(joined.contains("-f f32le -ar 48000 -ac 2 -ch_layout stereo"));
         assert!(joined.contains("-i tube -map 0:a:0 -c:a aac -b:a 192k"));
         assert!(!joined.contains("rawvideo"));
         assert!(joined.ends_with("-f matroska micro.mka"));

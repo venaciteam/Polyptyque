@@ -40,6 +40,7 @@ impl VideoTask {
         let mut next_index = 0u64;
         let mut next_search = 0u64;
         let mut next_minimized_check = 0u64;
+        let mut minimized = false;
         // Au-delà d'une seconde d'avance, l'encodeur ne suit plus : on
         // répète l'image précédente plutôt que d'accumuler de la mémoire.
         let max_backlog = fps as usize;
@@ -65,6 +66,7 @@ impl VideoTask {
                             shared.set_target(Some(window));
                             shared.set_state(SourceState::Connected);
                             next_minimized_check = 0;
+                            minimized = false;
                         }
                         Err(e) => {
                             log::warn!("[{}] capture de la fenêtre impossible : {e:#}", source.name);
@@ -92,12 +94,16 @@ impl VideoTask {
                     }
                     if !lost && now >= next_minimized_check {
                         next_minimized_check = now + MINIMIZED_CHECK_HNS;
-                        let state = if platform.is_window_minimized(*handle) {
-                            SourceState::Minimized
-                        } else {
-                            SourceState::Connected
-                        };
-                        shared.set_state(state);
+                        let now_minimized = platform.is_window_minimized(*handle);
+                        if now_minimized != minimized {
+                            minimized = now_minimized;
+                            if minimized {
+                                log::info!("[{}] fenêtre réduite : image figée jusqu'à son retour", source.name);
+                            } else {
+                                log::info!("[{}] fenêtre rétablie", source.name);
+                            }
+                        }
+                        shared.set_state(if minimized { SourceState::Minimized } else { SourceState::Connected });
                     }
                 }
             }
