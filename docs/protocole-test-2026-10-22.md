@@ -29,7 +29,7 @@ type: guide
 
 ## Récupérer la fabrication
 
-1. GitHub > dépôt Polyptyque > onglet **Actions** > la dernière exécution verte de la branche `dev`.
+1. GitHub > dépôt Polyptyque > onglet **Actions** > la dernière exécution verte de la branche `dev`. Fabrication vérifiée de la nuit : [exécution 36](https://github.com/venaciteam/Polyptyque/actions/runs/39686217229), [artefact `Polyptyque-windows`](https://github.com/venaciteam/Polyptyque/actions/runs/39686217229/artifacts/12387298585) (commit `04cb4b8`).
 2. En bas de la page, artefact **`Polyptyque-windows`** : il contient `Polyptyque-Setup.exe` et `Polyptyque-portable.zip`.
 
 > [!tip] Ordre conseillé
