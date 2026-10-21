@@ -304,7 +304,8 @@ fn parse_clock(text: &str) -> Option<f64> {
     let hours: f64 = parts.next()?.parse().ok()?;
     let minutes: f64 = parts.next()?.parse().ok()?;
     let seconds: f64 = parts.next()?.parse().ok()?;
-    parts.next().is_none().then_some(hours * 3600.0 + minutes * 60.0 + seconds)
+    let total = hours * 3600.0 + minutes * 60.0 + seconds;
+    (parts.next().is_none() && total.is_finite() && total >= 0.0).then_some(total)
 }
 
 /// Position atteinte, en secondes, d'après une ligne de `-progress`.

@@ -104,12 +104,17 @@ pub fn unblock(window: isize) {
     let _ = unsafe { ShutdownBlockReasonDestroy(hwnd(window)) };
 }
 
+/// Une panique ne doit jamais remonter jusqu'à Windows (procédure de
+/// fenêtre) : le processus s'arrêterait net, en pleine fermeture de session.
 fn notify(event: SessionEnd) -> bool {
-    HANDLER
-        .try_with(|h| h.try_borrow().ok().and_then(|h| h.as_ref().map(|handler| handler(event))))
-        .ok()
-        .flatten()
-        .unwrap_or(false)
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        HANDLER
+            .try_with(|h| h.try_borrow().ok().and_then(|h| h.as_ref().map(|handler| handler(event))))
+            .ok()
+            .flatten()
+            .unwrap_or(false)
+    }))
+    .unwrap_or(false)
 }
 
 unsafe extern "system" fn window_proc(

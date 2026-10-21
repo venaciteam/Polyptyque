@@ -352,7 +352,8 @@ pub fn run(platform: Arc<dyn Platform>, paths: Paths, initial: Option<Config>) -
 
     app.previews.borrow_mut().stop();
     // Fermeture par le système pendant un enregistrement : on finalise.
-    if let Some(session) = app.session.borrow_mut().take() {
+    let session = app.session.borrow_mut().take();
+    if let Some(session) = session {
         session.stop();
         app.clear_session_record();
     }
@@ -1050,7 +1051,8 @@ impl App {
     }
 
     fn finish_stop(&self, summaries: Vec<SourceSummary>, reason: Option<String>, clean: bool) {
-        if let Some(handle) = self.stop_thread.borrow_mut().take() {
+        let handle = self.stop_thread.borrow_mut().take();
+        if let Some(handle) = handle {
             let _ = handle.join();
         }
         if clean {
@@ -2554,7 +2556,12 @@ impl App {
     fn on_session_end(&self, event: polyptyque_windows::session_end::SessionEnd) -> bool {
         use polyptyque_windows::session_end::SessionEnd;
         match event {
-            SessionEnd::Query => self.recording() || self.stop_thread.borrow().is_some(),
+            // Appelé par Windows en plein traitement de message : aucune
+            // panique possible ici. Dans le doute, on bloque la fermeture.
+            SessionEnd::Query => {
+                self.session.try_borrow().map_or(true, |s| s.is_some())
+                    || self.stop_thread.try_borrow().map_or(true, |t| t.is_some())
+            }
             SessionEnd::Ending => {
                 self.finalize_now();
                 false
@@ -2606,7 +2613,9 @@ impl App {
     /// finalisés tout de suite, avant que Windows ne ferme Polyptyque.
     #[cfg(windows)]
     fn finalize_now(&self) {
-        self.previews.borrow_mut().stop();
+        if let Ok(mut previews) = self.previews.try_borrow_mut() {
+            previews.stop();
+        }
         let session = self.session.try_borrow_mut().ok().and_then(|mut s| s.take());
         if let Some(session) = session {
             let summaries = session.stop();
@@ -2795,7 +2804,11 @@ fn report_text(report: &FileReport) -> String {
         FileReport::Missing => "Introuvable : déplacé ou supprimé ?".into(),
         FileReport::Empty => "Vide : rien n'avait été écrit".into(),
         FileReport::Complete { seconds, size } => {
-            format!("Complet · {} · {}", format::clock(Duration::from_secs_f64(*seconds)), format::bytes(*size))
+            format!(
+                "Complet · {} · {}",
+                format::clock(Duration::try_from_secs_f64(*seconds).unwrap_or_default()),
+                format::bytes(*size)
+            )
         }
         FileReport::NeedsRepair { size } => format!("Interrompu, lisible, à réparer · {}", format::bytes(*size)),
         FileReport::Unreadable(e) => format!("Illisible : {e}"),
