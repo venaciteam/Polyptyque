@@ -68,7 +68,7 @@ Chaque scénario porte un identifiant (A1, B3…) repris dans le plan d'action.
 | A6 | Conversion MP4 interrompue (plantage, coupure) | faible | moyenne | Le MP4 partiel garde son nom définitif et semble valide alors qu'il est tronqué | Écriture sous un nom temporaire, renommé seulement après vérification ; restes supprimés au démarrage | P2 |
 | A7 | Journaux qui s'accumulent | forte | faible | Un journal par lancement et un dossier par session, jamais supprimés | Suppression automatique après 30 jours | P3 |
 | A8 | Mise à jour interrompue ou bloquée | faible | moyenne | Velopack 1.2.161 remplace le dossier du programme en deux temps : l'ancien est mis de côté, puis le nouveau prend sa place. Si le premier temps échoue (fichier verrouillé), l'ancienne version est relancée. Si le second échoue (par exemple un antivirus qui analyse les nouveaux fichiers), la copie mise de côté est effacée : Polyptyque ne démarre plus et doit être réinstallé ; réglages, scènes et profils, rangés ailleurs, sont conservés. Vérifié dans le code de Velopack, qui a corrigé ce défaut le 2026-10-10, pour l'instant seulement dans une préversion | Passer à la première version stable de Velopack qui contient ce correctif (pas de préversion) | P2 |
-| A9 | Mémoire qui grimpe sur 12 h | inconnue | forte | Non mesuré | Mesure pendant le test d'endurance (Gestionnaire des tâches, en début et en fin de session) | test |
+| A9 | Mémoire qui grimpe sur 12 h | faible | forte | Mesuré pendant le test d'endurance du 2026-10-21 (14 h 15, trois sources) : environ 415 Mo pour Polyptyque et 195 Mo par FFmpeg, sans croissance constatée | Rien à ajouter | — |
 
 ## B - Windows et le matériel
 
@@ -126,6 +126,7 @@ Chaque scénario porte un identifiant (A1, B3…) repris dans le plan d'action.
 ## Déjà couvert
 
 > [!success] Points solides, vérifiés
+> - Endurance : 14 h 15 avec trois sources sans incident, fichiers synchrones, mémoire stable (test réel du 2026-10-21).
 > - Encodeur planté ou figé : relance dans une nouvelle partie, image et son recalés (tests de simulation avec un vrai plantage et un vrai blocage de FFmpeg).
 > - Fichiers MKV écrits au fil de l'eau, par blocs d'une seconde.
 > - Fenêtre perdue : image noire, silence, rattachement automatique (confirmé en test réel).

@@ -366,14 +366,14 @@ Solution retenue : **[[Velopack]]** (outil d'installation et de mise à jour éc
 
 ### Fiabilité
 
-- [ ] Tenir **12 h** d'enregistrement continu avec plusieurs sources.
+- [x] Tenir **12 h** d'enregistrement continu avec plusieurs sources (validé le 2026-10-21 : 14 h 15 avec trois sources en 1280×720, 30 i/s ; la charge en 1080p60 reste à mesurer).
 - [ ] Fichiers MKV écrits au fil de l'eau, **lisibles même après un plantage** ou une coupure de courant.
-- [ ] **Désynchronisation** entre fichiers inférieure à une image (16 ms à 60 i/s) sur 12 h, à mesurer.
+- [x] **Désynchronisation** entre fichiers inférieure à une image (16 ms à 60 i/s) sur 12 h (mesuré le 2026-10-21 : après 14 h 15, les sons des trois fichiers se terminent à 2,4 ms près ; durées identiques).
 - [ ] **Isolation des pannes** : une source en échec n'interrompt jamais les autres.
 - [ ] **Relance automatique** d'un encodeur arrêté ou figé, dans un nouveau fichier ; perte limitée à environ une seconde (fichiers écrits par blocs d'une seconde).
 - [ ] **Fermeture de session Windows** : arrêt bloqué avec explication, sinon fichiers finalisés avant la fermeture.
 - [ ] **Surveillance du disque** : estimation avant démarrage, alertes par paliers, arrêt propre (fichiers correctement fermés) si l'espace vient à manquer.
-- [ ] **Mémoire stable** sur 12 h (aucune fuite), vérifiée par des tests d'endurance.
+- [x] **Mémoire stable** sur 12 h (aucune fuite), vérifiée par des tests d'endurance (2026-10-21 : environ 415 Mo pour Polyptyque et 195 Mo par FFmpeg, sans croissance constatée).
 - [ ] **Journal technique** détaillé pour le diagnostic.
 
 ### Performance
@@ -509,9 +509,10 @@ Seule une implémentation de `Platform` est à écrire pour chaque système (`po
 > - [x] Navigateurs gérés : détection, profils dédiés, lancement, restauration des onglets, reconnaissance
 > - [x] Validation sur la machine de référence : capture, encodage NVENC, plusieurs réglages de qualité
 > - [x] Validation sur la machine de référence : **son isolé par profil de navigateur**
-> - [ ] Validation sur la machine de référence : Discord, bordure jaune
+> - [x] Validation sur la machine de référence : pas de bordure jaune (autorisation de Windows accordée)
+> - [ ] Validation sur la machine de référence : Discord
 > - [ ] Nombre de flux 1080p60 encodables en parallèle sur la RTX 3080
-> - [ ] Test d'endurance de 1 h, puis de 12 h ; vérification de la synchronisation et de la lisibilité des fichiers
+> - [x] Test d'endurance de 1 h, puis de 12 h ; vérification de la synchronisation et de la lisibilité des fichiers (14 h 15 le 2026-10-21)
 
 > [!todo] Étape 1 - Robustesse du moteur, écrite le 2026-10-20
 > - [x] Aperçus plus nets, définition adaptée à la taille des cartes
@@ -589,6 +590,7 @@ Seule une implémentation de `Platform` est à écrire pour chaque système (`po
 | 2026-10-21 | Version portable autonome : tout dans le dossier de Polyptyque sauf les enregistrements, pour changer de PC sans rien perdre ; à faire après les tests de fiabilité |
 | 2026-10-21 | Recherche du meilleur encodeur conservée à chaque démarrage d'enregistrement (garantit un encodeur fonctionnel, environ une seconde) |
 | 2026-10-21 | Test d'endurance : écran débranché pendant l'enregistrement, fenêtres vues « Réduites » (image figée, son conservé), reprise normale ensuite. Ajout prévu d'un bouton « Rétablir la fenêtre » |
+| 2026-10-21 | Test d'endurance réussi : 14 h 15 min 40 s, trois sources Firefox (1280×720, 30 i/s, 2,5 Mb/s, NVENC). Aucune relance d'encodeur ni fenêtre perdue ; trois fichiers de 14:15:39 ; sons à 2,4 ms près ; image et son synchrones à l'œil ; mémoire stable ; processeur environ 3 %, carte graphique environ 4,5 % par source ; 51,3 Go au total |
 
 ---
 
