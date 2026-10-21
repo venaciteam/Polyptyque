@@ -99,7 +99,7 @@ Chaque scénario porte un identifiant (A1, B3…) repris dans le plan d'action.
 | N° | Scénario | Prob. | Grav. | Aujourd'hui | Proposition | Prio. |
 |---|---|---|---|---|---|---|
 | D1 | Encodeur planté ou figé | faible | forte | Relance automatique dans `…_partie2.mkv`, environ une seconde perdue (testé en simulation) | Rien à ajouter | — |
-| D2 | Trop de sources pour la carte NVIDIA | moyenne | forte | %%RECHERCHE-D2%% L'encodeur refusé échoue trois fois, puis la source passe en erreur | Bascule automatique de la source refusée sur un autre encodeur (processeur), avec message | P2 |
+| D2 | Trop d'encodages simultanés pour une carte GeForce | faible | forte | NVIDIA limite le nombre d'encodages simultanés **pour tout l'ordinateur**, tous logiciels confondus (OBS, Discord, enregistrement NVIDIA en arrière-plan…) : 12 aujourd'hui selon NVIDIA, au moins 8 avec le pilote 570 exigé par Polyptyque. Au-delà, FFmpeg refuse avec un message trompeur (`OpenEncodeSessionEx failed: out of memory (10)`). L'encodeur refusé échoue trois fois, puis la source passe en erreur avec ce message. La limite réelle sera sans doute plutôt la puissance de la puce (à mesurer, voir le cahier des charges) | Reconnaître ce refus : bascule automatique de la source sur l'encodage par le processeur, avec un message clair (« limite de la carte NVIDIA atteinte, autres logiciels compris ») | P2 |
 | D3 | Disque plein | moyenne | forte | Estimation avant le départ, alerte, arrêt propre sous 1 Go libre | Rien à ajouter | — |
 | D4 | Disque externe débranché, dossier devenu inaccessible | faible | forte | L'encodeur échoue en boucle, puis chaque source passe en erreur avec un message technique | Bascule automatique vers un dossier de secours (`Vidéos\Polyptyque`) et message clair | P1 |
 | D5 | Dossier sur une clé ou un disque en FAT32 | moyenne | moyenne | Fichiers limités à 4 Go par ce format : l'encodeur échoue à 4 Go et repart dans une nouvelle partie (environ une seconde perdue à chaque fois) | Détection à l'enregistrement des réglages et au démarrage : avertissement, et découpage propre avant 4 Go | P2 |
@@ -184,6 +184,7 @@ Chaque scénario porte un identifiant (A1, B3…) repris dans le plan d'action.
 | Pilote graphique | <kbd>Win</kbd> + <kbd>Ctrl</kbd> + <kbd>Maj</kbd> + <kbd>B</kbd> (redémarre le pilote graphique, écran noir une seconde) | Capture rattachée, nouvelle partie si l'encodeur a planté (B6) |
 | Sortie audio | Brancher ou changer de casque pendant l'enregistrement | Le son des sources continue (B7) |
 | Verrouillage | <kbd>Win</kbd> + <kbd>L</kbd> pendant deux minutes, puis déverrouiller | Image pendant le verrouillage, reprise après (B5) |
+| Mise en veille | Démarrer > Marche/Arrêt > Mettre en veille pendant un enregistrement, réveiller après deux minutes | Fichiers lisibles, durée du rattrapage d'images figées, image et son repris après le réveil (B3) |
 | Renommage | Renommer un MKV en cours d'enregistrement dans l'Explorateur | Refus de Windows ou effet sur l'enregistrement (E9) |
 | Mémoire | Relever la mémoire de Polyptyque et des FFmpeg au début et à la fin du test de 12 h | Pas de croissance continue (A9) |
 
