@@ -12,7 +12,7 @@ use polyptyque_core::config::{CHANNELS, SAMPLE_RATE};
 use polyptyque_core::platform::{AudioCapture, AudioPacket, Platform};
 use polyptyque_core::timeline::{approximate_times, AudioTimeline, PacketTime, HNS_PER_SEC};
 
-use crate::shared::{Shared, SourceState};
+use crate::shared::{run_protected, Shared, SourceState};
 
 const READ_TIMEOUT_MS: u32 = 20;
 const RETRY_HNS: u64 = 2 * HNS_PER_SEC;
@@ -41,8 +41,20 @@ pub(crate) struct AudioTask {
 
 impl AudioTask {
     pub fn run(self) {
-        let AudioTask { platform, name, input, shared, queue, t0_hns } = self;
-        let mut timeline = AudioTimeline::new(t0_hns, SAMPLE_RATE, CHANNELS);
+        // Échantillons déjà transmis : une relance après une erreur interne
+        // reprend au même point de l'horloge.
+        let mut sent = 0u64;
+        let what = match self.input {
+            AudioInput::Window => "la capture du son",
+            AudioInput::Microphone(_) => "la capture du micro",
+        };
+        run_protected(&self.shared, &self.name, what, || self.capture(&mut sent));
+    }
+
+    fn capture(&self, sent: &mut u64) {
+        let (platform, name, input, shared, queue) =
+            (&self.platform, &self.name, &self.input, &self.shared, &self.queue);
+        let mut timeline = AudioTimeline::new(self.t0_hns, SAMPLE_RATE, CHANNELS).resumed(*sent);
         let mut capture: Option<Box<dyn AudioCapture>> = None;
         let mut generation = u64::MAX;
         let mut retry_at = 0u64;
@@ -62,6 +74,7 @@ impl AudioTask {
                 if now >= stop {
                     timeline.finish(stop, &mut out);
                     if !out.is_empty() {
+                        *sent = timeline.written_frames();
                         let _ = queue.send(std::mem::take(&mut out));
                     }
                     break;
@@ -161,8 +174,11 @@ impl AudioTask {
             }
             timeline.pad_idle(arrival, &mut out);
 
-            if !out.is_empty() && queue.send(std::mem::take(&mut out)).is_err() {
-                return;
+            if !out.is_empty() {
+                *sent = timeline.written_frames();
+                if queue.send(std::mem::take(&mut out)).is_err() {
+                    return;
+                }
             }
         }
 

@@ -238,6 +238,28 @@ impl Shared {
     }
 }
 
+/// Relances d'un fil de capture après une erreur interne, au-delà
+/// desquelles la source passe en erreur.
+const MAX_TASK_RESTARTS: u32 = 3;
+
+/// Exécute `task` en le relançant s'il s'arrête sur une erreur interne
+/// (le détail est déjà dans le journal, par le gestionnaire de paniques) :
+/// une erreur dans une source ne passe jamais inaperçue et ne touche pas les
+/// autres. `task` doit reprendre là où il s'était arrêté.
+pub(crate) fn run_protected(shared: &Shared, name: &str, what: &str, mut task: impl FnMut()) {
+    let mut restarts = 0;
+    while std::panic::catch_unwind(std::panic::AssertUnwindSafe(&mut task)).is_err() {
+        restarts += 1;
+        if restarts > MAX_TASK_RESTARTS || shared.stop_at().is_some() {
+            shared.fail(format!("[{name}] erreur interne répétée dans {what} (voir le journal)"));
+            return;
+        }
+        log::warn!("[{name}] erreur interne dans {what} : relance ({restarts}/{MAX_TASK_RESTARTS})");
+        shared.note_error(format!("Erreur interne dans {what} : relancée"));
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+}
+
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
@@ -267,6 +289,30 @@ mod tests {
         assert_eq!(shared.state(), SourceState::Finished);
         shared.fail("échec".into());
         assert_eq!(shared.state(), SourceState::Failed);
+    }
+
+    #[test]
+    fn protected_task_is_restarted_then_given_up() {
+        let shared = Shared::new();
+        let mut runs = 0;
+        run_protected(&shared, "essai", "la capture", || {
+            runs += 1;
+            if runs < 3 {
+                panic!("erreur simulée");
+            }
+        });
+        assert_eq!(runs, 3);
+        assert!(!shared.has_failed());
+        assert!(shared.error().is_some_and(|e| e.contains("relancée")));
+
+        let shared = Shared::new();
+        let mut runs = 0;
+        run_protected(&shared, "essai", "la capture", || {
+            runs += 1;
+            panic!("erreur simulée");
+        });
+        assert_eq!(runs, MAX_TASK_RESTARTS + 1);
+        assert!(shared.has_failed());
     }
 
     #[test]

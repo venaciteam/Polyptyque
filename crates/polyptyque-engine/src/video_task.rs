@@ -13,7 +13,7 @@ use polyptyque_core::timeline::{frame_time_hns, frames_due, HNS_PER_SEC};
 use polyptyque_core::video::black_nv12;
 
 use crate::resolve;
-use crate::shared::{Shared, SourceState};
+use crate::shared::{run_protected, Shared, SourceState};
 
 /// Intervalle de recherche d'une fenêtre absente.
 const SEARCH_INTERVAL_HNS: u64 = HNS_PER_SEC;
@@ -32,12 +32,20 @@ pub(crate) struct VideoTask {
 
 impl VideoTask {
     pub fn run(self) {
-        let VideoTask { platform, source, shared, queue, t0_hns, width, height, fps } = self;
+        // Images déjà émises : une relance après une erreur interne reprend
+        // au même rang, image et son restent calés.
+        let mut sent = 0u64;
+        run_protected(&self.shared, &self.source.name, "la capture de l'image", || self.capture(&mut sent));
+    }
+
+    fn capture(&self, sent: &mut u64) {
+        let (platform, source, shared, queue) = (&self.platform, &self.source, &self.shared, &self.queue);
+        let (t0_hns, width, height, fps) = (self.t0_hns, self.width, self.height, self.fps);
         let black: Nv12Frame = Arc::new(black_nv12(width, height));
         let mut latest = black.clone();
         let mut last_sent = black.clone();
         let mut capture: Option<(Box<dyn VideoCapture>, WindowHandle)> = None;
-        let mut next_index = 0u64;
+        let mut next_index = *sent;
         let mut next_search = 0u64;
         let mut next_minimized_check = 0u64;
         let mut minimized = false;
@@ -132,6 +140,7 @@ impl VideoTask {
                 }
                 last_sent = frame;
                 next_index += 1;
+                *sent = next_index;
             }
             shared.frames_total.store(next_index, Ordering::Relaxed);
             shared.video_backlog.store(queue.len() as u64, Ordering::Relaxed);

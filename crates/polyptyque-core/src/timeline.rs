@@ -80,6 +80,13 @@ impl AudioTimeline {
         }
     }
 
+    /// Reprend un flux dont `frames` échantillons ont déjà été transmis
+    /// (fil de capture relancé après une erreur interne).
+    pub fn resumed(mut self, frames: u64) -> Self {
+        self.written = frames;
+        self
+    }
+
     pub fn frame_bytes(&self) -> usize {
         self.frame_bytes
     }
