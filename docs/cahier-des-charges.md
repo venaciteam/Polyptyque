@@ -645,6 +645,7 @@ Seule une implémentation de `Platform` est à écrire pour chaque système (`po
 | 2026-10-22 | Navigateurs des sources fermés en quittant Polyptyque (réglage, activé par défaut, toutes scènes) : demande de fermeture comme leur croix, fenêtre de la source en dernier ; jamais à la fermeture de la session Windows |
 | 2026-10-22 | Niveau sonore des sources affiché en permanence (comme OBS), par une écoute légère suspendue dès que le moteur écoute la source ; micro exclu (icône « micro utilisé » de Windows sinon allumée en permanence) |
 | 2026-10-22 | Test du micro dans les réglages : niveau du micro choisi, écouté seulement réglages ouverts |
+| 2026-10-22 | Publication de la 1.0.0-beta.2 (préversion) : niveau sonore permanent, fermeture des navigateurs des sources, test du micro |
 
 ---
 
