@@ -139,6 +139,7 @@ export global Bridge {
     in-out property <bool> settings-previews;
     in-out property <bool> settings-convert;
     in-out property <bool> settings-check-updates;
+    in-out property <bool> settings-open-windows;
     in-out property <bool> settings-mic;
     in property <[string]> mic-choices;
     in-out property <int> mic-index;
@@ -166,6 +167,7 @@ export global Bridge {
     callback move-source(int);
     callback open-source(string);
     callback restore-window(string);
+    callback open-scene-windows();
 
     // Enregistrement interrompu (plantage, coupure de courant) : bilan au
     // lancement suivant.

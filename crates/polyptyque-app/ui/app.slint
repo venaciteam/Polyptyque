@@ -415,6 +415,16 @@ component SourcesPanel inherits Panel {
                 Bridge.request-add-application();
             }
         }
+        ActionButton {
+            text: "Ouvrir les fenêtres";
+            icon: @image-url("icons/launch.svg");
+            has-icon: true;
+            kind: "ghost";
+            enabled: Bridge.sources.length > 0;
+            clicked => {
+                Bridge.open-scene-windows();
+            }
+        }
         Rectangle { }
         IconButton {
             icon: @image-url("icons/up.svg");

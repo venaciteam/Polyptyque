@@ -336,6 +336,9 @@ pub struct Settings {
     pub convert_to_mp4: bool,
     /// Recherche d'une nouvelle version au démarrage (sur GitHub).
     pub check_updates: bool,
+    /// Au lancement de Polyptyque, ouvrir les fenêtres manquantes de la
+    /// scène active (navigateurs, applications dont la relance est activée).
+    pub open_windows_at_launch: bool,
     pub video: VideoSettings,
     pub audio: AudioSettings,
     pub microphone: MicrophoneSettings,
@@ -350,6 +353,7 @@ impl Default for Settings {
             previews: true,
             convert_to_mp4: false,
             check_updates: true,
+            open_windows_at_launch: true,
             video: VideoSettings::default(),
             audio: AudioSettings::default(),
             microphone: MicrophoneSettings::default(),

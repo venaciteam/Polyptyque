@@ -176,6 +176,8 @@ pub struct App {
     /// l'enregistrement démarré entre-temps.
     pending_repairs: RefCell<Vec<PathBuf>>,
     deferred: RefCell<Vec<Deferred>>,
+    /// Ouverture des fenêtres de la scène en cours.
+    opening_windows: Cell<bool>,
     /// Micros proposés dans les réglages : identifiant et nom.
     mic_choices: RefCell<Vec<(String, String)>>,
     /// Un problème de micro a déjà été signalé pendant cet enregistrement.
@@ -291,6 +293,7 @@ pub fn run(platform: Arc<dyn Platform>, paths: Paths, initial: Option<Config>) -
         incident_files: Rc::new(VecModel::default()),
         pending_repairs: RefCell::new(Vec::new()),
         deferred: RefCell::new(Vec::new()),
+        opening_windows: Cell::new(false),
         mic_choices: RefCell::new(Vec::new()),
         mic_warned: Cell::new(false),
         update: RefCell::new(None),
@@ -322,6 +325,9 @@ pub fn run(platform: Arc<dyn Platform>, paths: Paths, initial: Option<Config>) -
     app.restart_previews();
     app.register_hotkeys();
     app.check_interrupted_session();
+    if app.config.borrow().settings.open_windows_at_launch {
+        app.open_scene_windows(true);
+    }
     if let Some(message) = warning {
         app.toast(&message, 2);
     } else if let Some(version) = crate::UPDATED_TO.get() {
@@ -413,6 +419,9 @@ fn install_callbacks(ui: &AppWindow) {
     });
     b.on_restore_window(|id| {
         with_app(|a| a.restore_window(&id));
+    });
+    b.on_open_scene_windows(|| {
+        with_app(|a| a.open_scene_windows(false));
     });
     b.on_incident_repair(|| {
         with_app(|a| a.incident_repair());
@@ -1248,13 +1257,12 @@ impl App {
                     // relancer en ouvrirait une seconde.
                     return;
                 }
-                if resolve::profile_in_use(&source) {
-                    // Firefox se ferme ou redémarre encore : on réessaiera.
-                    return;
-                }
-                let result = resolve::launch(&source);
+                // Firefox qui se ferme ou redémarre encore, programme déjà en
+                // train de s'ouvrir : on réessaiera plus tard.
+                let result = resolve::launch_once(&source);
                 post(move |app| match result {
-                    Ok(()) => {
+                    Ok(false) => {}
+                    Ok(true) => {
                         log::info!("[{}] fenêtre perdue : programme rouvert automatiquement", source.name);
                         app.toast(
                             &format!("La fenêtre de « {} » a disparu : réouverture automatique.", source.name),
@@ -2105,19 +2113,81 @@ impl App {
                 return;
             }
         }
-        if resolve::profile_in_use(&source) {
-            self.toast(
+        match resolve::launch_once(&source) {
+            Ok(true) => self.toast(&format!("Ouverture de « {} »…", source.name), 1),
+            Ok(false) => self.toast(
                 &format!(
-                    "Firefox n'a pas fini de se fermer pour « {} » : réessaie dans quelques secondes.",
+                    "« {} » est déjà en train de s'ouvrir (ou de se fermer) : patiente quelques secondes.",
                     source.name
                 ),
                 2,
-            );
+            ),
+            Err(e) => self.toast(&format!("Impossible d'ouvrir « {} » : {e:#}", source.name), 3),
+        }
+    }
+
+    /// Ouvre les fenêtres manquantes de la scène active : navigateurs, et
+    /// applications dont la relance est activée. `auto` : au lancement de
+    /// Polyptyque, sans message si tout est déjà ouvert. Hors du fil de
+    /// l'interface : on attend que les fenêtres apparaissent.
+    fn open_scene_windows(&self, auto: bool) {
+        if self.opening_windows.get() {
+            if !auto {
+                self.toast("Les fenêtres de la scène sont déjà en train de s'ouvrir.", 1);
+            }
             return;
         }
-        match resolve::launch(&source) {
-            Ok(()) => self.toast(&format!("Ouverture de « {} »…", source.name), 1),
-            Err(e) => self.toast(&format!("Impossible d'ouvrir « {} » : {e:#}", source.name), 3),
+        let sources: Vec<Source> =
+            self.config.borrow().active_scene().sources.iter().filter(|s| s.should_launch()).cloned().collect();
+        if sources.is_empty() {
+            if !auto {
+                self.toast(
+                    "Aucune fenêtre à ouvrir : seuls les navigateurs, et les applications avec « Relancer », s'ouvrent depuis Polyptyque.",
+                    2,
+                );
+            }
+            return;
+        }
+        self.opening_windows.set(true);
+        let platform = self.platform.clone();
+        thread::spawn(move || {
+            let mut opening = Vec::new();
+            let mut failed = Vec::new();
+            let mut missing = catch_unwind(AssertUnwindSafe(|| {
+                resolve::prepare_windows(platform.as_ref(), &sources, LAUNCH_WAIT, |event| match event {
+                    PrepareEvent::Launching(source) => {
+                        if opening.is_empty() {
+                            post(|app| app.toast("Ouverture des fenêtres de la scène…", 1));
+                        }
+                        opening.push(source.name.clone());
+                    }
+                    PrepareEvent::LaunchFailed(source, error) => {
+                        log::warn!("[{}] ouverture impossible : {error}", source.name);
+                        failed.push(source.name.clone());
+                    }
+                    _ => {}
+                })
+            }))
+            .unwrap_or_default();
+            missing.retain(|name| !failed.contains(name));
+            post(move |app| app.finish_open_scene_windows(auto, opening, failed, missing));
+        });
+    }
+
+    fn finish_open_scene_windows(&self, auto: bool, opening: Vec<String>, failed: Vec<String>, missing: Vec<String>) {
+        self.opening_windows.set(false);
+        if !failed.is_empty() {
+            self.toast(
+                &format!("Impossible d'ouvrir : {} (programme introuvable ? voir le journal).", failed.join(", ")),
+                3,
+            );
+        } else if !missing.is_empty() {
+            self.toast(&format!("Fenêtre(s) toujours absente(s) après 30 s : {}.", missing.join(", ")), 2);
+        } else if !opening.is_empty() {
+            log::info!("fenêtres de la scène ouvertes : {}", opening.join(", "));
+            self.toast(&format!("{} fenêtre(s) ouverte(s).", opening.len()), 1);
+        } else if !auto {
+            self.toast("Toutes les fenêtres de la scène sont déjà ouvertes.", 1);
         }
     }
 
@@ -2234,6 +2304,7 @@ impl App {
             }
         };
         let mic_enabled = mic.enabled;
+        let s_open_windows = s.open_windows_at_launch;
         let mic_labels: Vec<SharedString> = mics.iter().map(|(_, name)| name.as_str().into()).collect();
         *self.mic_choices.borrow_mut() = mics;
         drop(config);
@@ -2259,6 +2330,7 @@ impl App {
             b.set_settings_previews(values.10);
             b.set_settings_convert(values.11);
             b.set_settings_check_updates(values.12);
+            b.set_settings_open_windows(s_open_windows);
             b.set_settings_mic(mic_enabled);
             b.set_mic_choices(ModelRc::new(VecModel::from(mic_labels)));
             b.set_mic_index(mic_index as i32);
@@ -2355,6 +2427,7 @@ impl App {
             check_updates_before = s.check_updates;
             s.check_updates = b.get_settings_check_updates();
             check_updates_after = s.check_updates;
+            s.open_windows_at_launch = b.get_settings_open_windows();
             s.microphone.enabled = b.get_settings_mic();
             if let Some((id, name)) = self.mic_choices.borrow().get(b.get_mic_index().max(0) as usize) {
                 if *id != s.microphone.device_id {

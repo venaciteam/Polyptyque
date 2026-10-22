@@ -54,10 +54,13 @@ Utilisation
    Tout son joué dans ce profil sera enregistré dans le fichier de la source.
 3. Sources → « Application » : choisir une fenêtre ouverte (Discord, jeu,
    Tor Browser…).
-4. « Démarrer l'enregistrement ». Polyptyque retrouve ou rouvre les fenêtres,
+4. Au lancement, Polyptyque ouvre seul les fenêtres de la scène en cours
+   (navigateurs, et applications avec « Relancer ») ; le bouton « Ouvrir les
+   fenêtres » le fait à la demande. Réglable dans les réglages.
+5. « Démarrer l'enregistrement ». Polyptyque retrouve ou rouvre les fenêtres,
    puis affiche l'état de chaque source. « Tout arrêter » finalise les
    fichiers.
-5. Le bouton rond de chaque aperçu démarre ou arrête cette seule source,
+6. Le bouton rond de chaque aperçu démarre ou arrête cette seule source,
    même pendant un enregistrement (une source ajoutée en cours de route
    commence un nouveau fichier).
 

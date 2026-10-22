@@ -75,6 +75,12 @@ type: guide
 
 ## C - Nouveautés de la nuit
 
+- [ ] **C0 - Ouverture des fenêtres de la scène**
+	- Faire : fermer tous les navigateurs de la scène, puis fermer et relancer Polyptyque.
+	- Attendu : message « Ouverture des fenêtres de la scène… », puis toutes les fenêtres s'ouvrent seules, connectées.
+	- Puis : refermer deux navigateurs et cliquer sur **« Ouvrir les fenêtres »** (panneau des sources) : les deux reviennent, sans doublon des autres.
+	- Puis : dans les réglages, désactiver « Ouvrir les fenêtres de la scène au lancement », relancer Polyptyque : plus rien ne s'ouvre seul.
+	- Puis : cliquer sur « Ouvrir les fenêtres » puis tout de suite sur « Démarrer l'enregistrement » : aucun Firefox en double, pas de message « Firefox est déjà ouvert ».
 - [ ] **C1 - Rétablir une fenêtre réduite**
 	- Faire : pendant un enregistrement, réduire une fenêtre capturée dans la barre des tâches.
 	- Attendu : la carte affiche « Réduite (image figée) » et un bouton **« Rétablir la fenêtre »**. Un clic fait revenir la fenêtre **sans lui donner le focus**, et la carte repasse à « Enregistre ». Une fenêtre qui était en plein écran revient en plein écran (et prend alors le focus).

@@ -174,7 +174,7 @@ graph TD
 
 ### Reconnaissance et restauration des fenêtres
 
-Au démarrage d'un enregistrement, pour chaque source enregistrée (les aperçus, eux, cherchent les fenêtres dès le lancement de Polyptyque, sans rien relancer) :
+Au lancement de Polyptyque (réglage « Ouvrir les fenêtres de la scène au lancement », activé par défaut), avec le bouton « Ouvrir les fenêtres » du panneau des sources, et au démarrage d'un enregistrement, pour chaque source de la scène en cours (un changement de scène n'ouvre rien) :
 
 1. **Source navigateur** : recherche du processus dont la ligne de commande contient le dossier du profil dédié. S'il existe, sa fenêtre principale est rattachée ; sinon, le navigateur est relancé avec ce profil.
 2. **Source application** : recherche par ordre de précision décroissante :
@@ -629,6 +629,7 @@ Seule une implémentation de `Platform` est à écrire pour chaque système (`po
 | 2026-10-22 | Réglages : version précédente et cinq sauvegardes quotidiennes, restauration automatique d'un fichier abîmé ou vide |
 | 2026-10-22 | Une seule copie de Polyptyque par session Windows ; dossier de secours `Vidéos\Polyptyque` si le dossier choisi devient inaccessible |
 | 2026-10-22 | Mise en veille pendant un enregistrement : arrêt propre et reprise proposée au réveil, plutôt qu'une pause (choix provisoire) ; journaux conservés 30 jours |
+| 2026-10-22 | Fenêtres de la scène : ouvertes au lancement de Polyptyque (réglage, activé par défaut), ou d'un clic avec « Ouvrir les fenêtres », ou une par une ; rien n'est ouvert au changement de scène. Un programme en train de s'ouvrir n'est jamais relancé (20 s) |
 | 2026-10-22 | Version portable : données dans `données` à la racine du dossier décompressé, hors du dossier `current` que les mises à jour remplacent |
 
 ---

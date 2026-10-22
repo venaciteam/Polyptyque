@@ -5,6 +5,7 @@ use std::ffi::OsString;
 use std::fs;
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -80,8 +81,10 @@ pub fn prepare_windows(
         if find_window(platform, source, &windows).is_some() {
             on_event(PrepareEvent::Found(source));
         } else if source.should_launch() {
-            match launch(source) {
-                Ok(()) => {
+            // Déjà en train de s'ouvrir (lancé il y a peu, ou Firefox encore
+            // actif sur son profil) : on attend sa fenêtre sans le relancer.
+            match launch_once(source) {
+                Ok(_) => {
                     on_event(PrepareEvent::Launching(source));
                     waiting.push(source);
                 }
@@ -108,6 +111,38 @@ pub fn prepare_windows(
     }
     missing.extend(waiting.iter().map(|s| s.name.clone()));
     missing
+}
+
+/// Délai pendant lequel une source qui vient d'être lancée n'est pas
+/// relancée : son programme peut mettre quelques secondes à afficher sa
+/// fenêtre.
+const LAUNCH_GUARD: Duration = Duration::from_secs(20);
+
+/// Sources lancées récemment, avec l'heure du lancement.
+static RECENT_LAUNCHES: Mutex<Vec<(String, Instant)>> = Mutex::new(Vec::new());
+
+/// Lance le programme d'une source, sauf s'il est déjà en train de s'ouvrir :
+/// lancé il y a moins de 20 s (sa fenêtre n'est pas encore là), ou Firefox
+/// encore actif sur son profil. Un second lancement ouvrirait une fenêtre de
+/// trop, ou afficherait « Firefox est déjà ouvert ». Renvoie faux si le
+/// programme n'a pas été relancé pour cette raison.
+pub fn launch_once(source: &Source) -> Result<bool> {
+    if profile_in_use(source) {
+        return Ok(false);
+    }
+    {
+        let mut recent = RECENT_LAUNCHES.lock().unwrap_or_else(|e| e.into_inner());
+        recent.retain(|(_, at)| at.elapsed() < LAUNCH_GUARD);
+        if recent.iter().any(|(id, _)| *id == source.id) {
+            return Ok(false);
+        }
+        recent.push((source.id.clone(), Instant::now()));
+    }
+    if let Err(e) = launch(source) {
+        RECENT_LAUNCHES.lock().unwrap_or_else(|e| e.into_inner()).retain(|(id, _)| *id != source.id);
+        return Err(e);
+    }
+    Ok(true)
 }
 
 /// Lance le programme d'une source : le navigateur sur son profil dédié, ou
@@ -184,6 +219,27 @@ fn same_file_name(a: &Path, b: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn a_source_is_not_launched_twice_while_opening() {
+        let window = WindowInfo {
+            handle: 1,
+            pid: 1,
+            title: "Essai".into(),
+            class: "Essai".into(),
+            exe: PathBuf::from("/bin/true"),
+        };
+        let source = Source::application("Essai", &window, true, true);
+        assert!(launch_once(&source).unwrap());
+        // Toujours en train de s'ouvrir : pas de second lancement.
+        assert!(!launch_once(&source).unwrap());
+        // Un lancement raté ne bloque pas l'essai suivant.
+        let missing = WindowInfo { exe: PathBuf::from("/introuvable/programme"), ..window };
+        let broken = Source::application("Cassée", &missing, true, true);
+        assert!(launch_once(&broken).is_err());
+        assert!(launch_once(&broken).is_err());
+    }
     use polyptyque_core::config::BrowserRef;
     use polyptyque_core::platform::*;
     use std::path::PathBuf;

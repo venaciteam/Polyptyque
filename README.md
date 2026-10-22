@@ -113,9 +113,10 @@ Paramètres de Windows > Applications. Les scènes, les réglages et les connexi
 
 1. **Ajouter une source navigateur** : choisir le navigateur, un nom, éventuellement une adresse. Polyptyque l'ouvre avec un profil qui lui est propre : s'y connecter, préparer ses onglets. Tout est conservé pour les fois suivantes.
 2. **Ajouter une source application** : choisir une fenêtre ouverte (Discord, un jeu, Tor Browser…).
-3. **Démarrer l'enregistrement** : Polyptyque retrouve ou rouvre les fenêtres, puis affiche l'état de chaque source.
-4. **Tout arrêter** : les fichiers sont finalisés proprement. Le bouton rond de chaque aperçu démarre ou arrête une seule source.
-5. **Fichiers** : ils sont dans `Vidéos\Polyptyque`, un fichier MKV par source, nommés par défaut `date_heure_scène_source.mkv`.
+3. **Ouvrir les fenêtres** : au lancement, Polyptyque ouvre seul les fenêtres de la scène en cours (navigateurs, et applications avec « Relancer »). Le bouton « Ouvrir les fenêtres » du panneau des sources le fait à la demande, et celui de chaque carte ouvre une seule source. L'ouverture au lancement se désactive dans les réglages.
+4. **Démarrer l'enregistrement** : Polyptyque retrouve ou rouvre les fenêtres manquantes, puis affiche l'état de chaque source.
+5. **Tout arrêter** : les fichiers sont finalisés proprement. Le bouton rond de chaque aperçu démarre ou arrête une seule source.
+6. **Fichiers** : ils sont dans `Vidéos\Polyptyque`, un fichier MKV par source, nommés par défaut `date_heure_scène_source.mkv`.
 
 **Raccourcis clavier**, actifs même quand Polyptyque est en arrière-plan et modifiables dans les réglages :
 

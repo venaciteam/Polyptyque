@@ -399,6 +399,13 @@ export component SettingsSheet inherits Sheet {
                     Bridge.settings-previews = value;
                 }
             }
+            Toggle {
+                text: "Ouvrir les fenêtres de la scène au lancement";
+                checked: Bridge.settings-open-windows;
+                toggled(value) => {
+                    Bridge.settings-open-windows = value;
+                }
+            }
             Field {
                 label: "Conversion pour le montage";
                 hint: "Copie MP4 sans perte de qualité, créée à côté du MKV, qui est conservé. Prévois le double d'espace disque.";
@@ -411,7 +418,7 @@ export component SettingsSheet inherits Sheet {
                 }
             }
             Toggle {
-                text: "Rechercher les mises à jour (au démarrage, puis toutes les 6 h)";
+                text: "Rechercher les mises à jour";
                 checked: Bridge.settings-check-updates;
                 toggled(value) => {
                     Bridge.settings-check-updates = value;
