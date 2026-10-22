@@ -343,6 +343,10 @@ pub struct Settings {
     /// Au lancement de Polyptyque, ouvrir les fenêtres manquantes de la
     /// scène active (navigateurs, applications dont la relance est activée).
     pub open_windows_at_launch: bool,
+    /// En quittant Polyptyque, fermer les fenêtres des navigateurs des
+    /// sources (profils dédiés, toutes scènes confondues). Les applications
+    /// ne sont jamais fermées.
+    pub close_browsers_at_exit: bool,
     pub video: VideoSettings,
     pub audio: AudioSettings,
     pub microphone: MicrophoneSettings,
@@ -359,6 +363,7 @@ impl Default for Settings {
             check_updates: true,
             update_channel: None,
             open_windows_at_launch: true,
+            close_browsers_at_exit: true,
             video: VideoSettings::default(),
             audio: AudioSettings::default(),
             microphone: MicrophoneSettings::default(),

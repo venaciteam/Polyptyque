@@ -372,7 +372,9 @@ export component SourceCardView inherits Rectangle {
                     overflow: elide;
                 }
             }
-            if root.recording: VerticalLayout {
+            // Niveau sonore affiché en permanence : celui du moteur pendant
+            // l'enregistrement, sinon celui de l'écoute de la carte.
+            VerticalLayout {
                 width: 90px;
                 alignment: center;
                 spacing: 5px;

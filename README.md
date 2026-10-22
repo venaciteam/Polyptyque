@@ -58,7 +58,7 @@ Polyptyque fait l'inverse : **chaque fenêtre est enregistrée à part**, dans s
 **Le son de chaque fenêtre, et rien d'autre**
 - Chaque source navigateur a son propre profil : le son d'un onglet de Firefox ne se mélange pas avec celui d'un autre Firefox, ni avec Chrome ou Discord.
 - Le son d'une application (Discord, un jeu, Tor Browser…) est capté à la source, sans le reste du système.
-- Micro en option, dans un fichier séparé.
+- Micro en option, dans un fichier séparé, et testable dans les réglages avant d'enregistrer.
 
 **Des fichiers prêts pour le montage**
 - Un fichier par source, toutes sur une horloge commune : l'image et le son restent alignés d'un fichier à l'autre.
@@ -82,10 +82,12 @@ Polyptyque fait l'inverse : **chaque fenêtre est enregistrée à part**, dans s
 **Il retrouve vos fenêtres**
 - Les navigateurs sont reconnus par leur profil, pas par leur titre qui change à chaque onglet.
 - Au lancement, Polyptyque ouvre les fenêtres de la scène en cours (désactivable dans les réglages). Le bouton « Ouvrir les fenêtres » les ouvre à la demande, celui de chaque carte une seule.
+- En quittant Polyptyque, les navigateurs des sources se ferment avec lui et retrouvent leurs onglets au lancement suivant (désactivable dans les réglages). Les applications restent ouvertes.
 - Au démarrage d'un enregistrement, Polyptyque rouvre les fenêtres absentes : chaque navigateur revient sur ses onglets, connexions conservées.
 
 **Simple à utiliser**
 - Scènes (groupes de sources), aperçus en direct de chaque source, raccourcis clavier globaux.
+- Niveau sonore de chaque source affiché en permanence, même sans enregistrer : une source muette se repère avant de lancer l'enregistrement.
 - Un bouton pour tout enregistrer, ou un bouton par source pour enregistrer une source seule.
 - Encodage par la carte graphique (NVIDIA, AMD, Intel) quand elle est disponible, ou par le processeur. Si la carte refuse un encodage de plus (limite des cartes GeForce, autres logiciels compris), la source passe seule sur le processeur.
 
@@ -141,7 +143,7 @@ Paramètres de Windows > Applications. Les scènes, les réglages et les connexi
 
 1. **Ajouter une source navigateur** : choisir le navigateur, un nom, éventuellement une adresse. Polyptyque l'ouvre avec un profil qui lui est propre : s'y connecter, préparer ses onglets. Tout est conservé pour les fois suivantes.
 2. **Ajouter une source application** : choisir une fenêtre ouverte (Discord, un jeu, Tor Browser…).
-3. **Ouvrir les fenêtres** : au lancement, Polyptyque ouvre seul les fenêtres de la scène en cours (navigateurs, et applications avec « Relancer »). Le bouton « Ouvrir les fenêtres » du panneau des sources le fait à la demande, et celui de chaque carte ouvre une seule source. L'ouverture au lancement se désactive dans les réglages.
+3. **Ouvrir les fenêtres** : au lancement, Polyptyque ouvre seul les fenêtres de la scène en cours (navigateurs, et applications avec « Relancer »). Le bouton « Ouvrir les fenêtres » du panneau des sources le fait à la demande, et celui de chaque carte ouvre une seule source. L'ouverture au lancement se désactive dans les réglages, comme la fermeture des navigateurs en quittant Polyptyque.
 4. **Démarrer l'enregistrement** : Polyptyque retrouve ou rouvre les fenêtres manquantes, puis affiche l'état de chaque source.
 5. **Tout arrêter** : les fichiers sont finalisés proprement. Le bouton rond de chaque aperçu démarre ou arrête une seule source.
 6. **Fichiers** : par défaut dans `Vidéos\Polyptyque` (dossier modifiable dans les réglages), un fichier MKV par source, nommés par défaut `date_heure_scène_source.mkv`. Le bouton « Fichiers » ouvre ce dossier.
@@ -168,6 +170,7 @@ Paramètres de Windows > Applications. Les scènes, les réglages et les connexi
 - Une fenêtre réduite dans la barre des tâches n'est plus dessinée par Windows : son image se fige, et sa carte affiche « Réduite ». Le bouton « Rétablir la fenêtre » de la carte la ramène, même pendant l'enregistrement. Une fenêtre cachée derrière d'autres s'enregistre normalement.
 - Les contenus protégés (Netflix, Disney+…) apparaissent souvent en noir.
 - Certains jeux en plein écran exclusif donnent une image noire : préférer le mode « fenêtré sans bordure ».
+- Si le navigateur d'une source a plusieurs fenêtres, seule celle de la source revient au lancement suivant quand Polyptyque les ferme : Firefox et Chrome ne rouvrent que la dernière fenêtre fermée. Les autres restent dans « Fenêtres récemment fermées » de l'historique du navigateur.
 
 La liste complète, les choix techniques et la feuille de route sont dans le [cahier des charges](docs/cahier-des-charges.md).
 

@@ -64,6 +64,10 @@ impl Platform for WindowsPlatform {
         windows_list::restore(handle)
     }
 
+    fn close_window(&self, handle: WindowHandle) -> anyhow::Result<()> {
+        windows_list::close(handle)
+    }
+
     fn process_command_line(&self, pid: u32) -> Option<String> {
         process::command_line(pid)
     }

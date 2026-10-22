@@ -10,6 +10,7 @@ pub mod browsers;
 pub mod config;
 pub mod encoder;
 pub mod hotkeys;
+pub mod level;
 pub mod naming;
 pub mod paths;
 pub mod platform;

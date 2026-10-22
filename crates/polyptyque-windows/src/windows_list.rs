@@ -5,16 +5,16 @@ use std::ffi::c_void;
 use anyhow::{bail, Result};
 use polyptyque_core::platform::{WindowHandle, WindowInfo};
 use windows::core::BOOL;
-use windows::Win32::Foundation::{HWND, LPARAM, POINT, RECT, TRUE};
+use windows::Win32::Foundation::{HWND, LPARAM, POINT, RECT, TRUE, WPARAM};
 use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
 use windows::Win32::Graphics::Gdi::{
     GetMonitorInfoW, MonitorFromPoint, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONULL, MONITOR_DEFAULTTOPRIMARY,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GetClassNameW, GetWindow, GetWindowLongW, GetWindowPlacement, GetWindowRect, GetWindowTextW,
-    GetWindowThreadProcessId, IsIconic, IsWindow, IsWindowVisible, SetWindowPos, ShowWindow, GWL_EXSTYLE, GW_OWNER,
-    SWP_NOACTIVATE, SWP_NOZORDER, SW_SHOWMAXIMIZED, SW_SHOWNOACTIVATE, WINDOWPLACEMENT, WPF_RESTORETOMAXIMIZED,
-    WS_EX_TOOLWINDOW,
+    GetWindowThreadProcessId, IsIconic, IsWindow, IsWindowVisible, PostMessageW, SetWindowPos, ShowWindow,
+    GWL_EXSTYLE, GW_OWNER, SWP_NOACTIVATE, SWP_NOZORDER, SW_SHOWMAXIMIZED, SW_SHOWNOACTIVATE, WINDOWPLACEMENT,
+    WM_CLOSE, WPF_RESTORETOMAXIMIZED, WS_EX_TOOLWINDOW,
 };
 
 use crate::process;
@@ -104,6 +104,13 @@ pub fn is_alive(handle: WindowHandle) -> bool {
 
 pub fn is_minimized(handle: WindowHandle) -> bool {
     unsafe { IsIconic(hwnd(handle)).as_bool() }
+}
+
+/// Demande à la fenêtre de se fermer (`WM_CLOSE`, comme sa croix), sans
+/// attendre : un programme figé ne bloque pas l'appelant.
+pub fn close(handle: WindowHandle) -> Result<()> {
+    unsafe { PostMessageW(Some(hwnd(handle)), WM_CLOSE, WPARAM(0), LPARAM(0)) }?;
+    Ok(())
 }
 
 /// Fait revenir une fenêtre réduite sans lui donner le focus, et la replace
