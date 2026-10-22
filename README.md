@@ -48,17 +48,20 @@ Polyptyque fait l'inverse : **chaque fenêtre est enregistrée à part**, dans s
 **Pensé pour les longues sessions**
 - Testé sur 14 h 15 d'enregistrement continu avec trois sources : aucune coupure, fichiers calés à quelques millisecondes près, mémoire stable.
 - Fichiers écrits au fil de l'eau : un plantage ne fait perdre qu'environ une seconde, et un fichier coupé net (panne de courant) reste lisible.
+- Espace disque surveillé, avec arrêt propre s'il vient à manquer.
+- Mise en veille automatique empêchée. Une mise en veille demandée (capot fermé, bouton) ne peut pas l'être : l'enregistrement est alors arrêté proprement, et sa reprise proposée au réveil.
+- Si Windows s'éteint ou se déconnecte pendant un enregistrement, il le signale et laisse annuler ; sinon, les fichiers sont finalisés avant la fermeture.
+
+**Résistant aux incidents**
 - Après un plantage ou une coupure de courant, Polyptyque fait le bilan des fichiers au lancement suivant, propose de réparer ceux qui ont été coupés net (sans perte de qualité) et de reprendre l'enregistrement.
 - Si l'encodeur s'arrête ou se fige, Polyptyque le relance seul, dans un nouveau fichier, sans interrompre les autres sources.
 - Une fenêtre fermée ou plantée donne une image noire, puis est rattachée automatiquement dès qu'elle revient. Un navigateur fermé par erreur est rouvert tout seul ; une fenêtre réduite revient d'un clic, même si son écran a été débranché.
 - Disque externe débranché en cours de route : la suite est enregistrée dans `Vidéos\Polyptyque`.
 - Réglages protégés : version précédente et sauvegarde quotidienne, restaurées automatiquement si le fichier est abîmé.
-- Espace disque surveillé, avec arrêt propre s'il vient à manquer.
-- Mise en veille automatique empêchée. Une mise en veille demandée (capot fermé, bouton) ne peut pas l'être : l'enregistrement est alors arrêté proprement, et sa reprise proposée au réveil.
-- Si Windows s'éteint ou se déconnecte pendant un enregistrement, il le signale et laisse annuler ; sinon, les fichiers sont finalisés avant la fermeture.
 
 **Il retrouve vos fenêtres**
 - Les navigateurs sont reconnus par leur profil, pas par leur titre qui change à chaque onglet.
+- Au lancement, Polyptyque ouvre les fenêtres de la scène en cours (désactivable dans les réglages). Le bouton « Ouvrir les fenêtres » les ouvre à la demande, celui de chaque carte une seule.
 - Au démarrage d'un enregistrement, Polyptyque rouvre les fenêtres absentes : chaque navigateur revient sur ses onglets, connexions conservées.
 
 **Simple à utiliser**
@@ -116,7 +119,7 @@ Paramètres de Windows > Applications. Les scènes, les réglages et les connexi
 3. **Ouvrir les fenêtres** : au lancement, Polyptyque ouvre seul les fenêtres de la scène en cours (navigateurs, et applications avec « Relancer »). Le bouton « Ouvrir les fenêtres » du panneau des sources le fait à la demande, et celui de chaque carte ouvre une seule source. L'ouverture au lancement se désactive dans les réglages.
 4. **Démarrer l'enregistrement** : Polyptyque retrouve ou rouvre les fenêtres manquantes, puis affiche l'état de chaque source.
 5. **Tout arrêter** : les fichiers sont finalisés proprement. Le bouton rond de chaque aperçu démarre ou arrête une seule source.
-6. **Fichiers** : ils sont dans `Vidéos\Polyptyque`, un fichier MKV par source, nommés par défaut `date_heure_scène_source.mkv`.
+6. **Fichiers** : par défaut dans `Vidéos\Polyptyque` (dossier modifiable dans les réglages), un fichier MKV par source, nommés par défaut `date_heure_scène_source.mkv`. Le bouton « Fichiers » ouvre ce dossier.
 
 **Raccourcis clavier**, actifs même quand Polyptyque est en arrière-plan et modifiables dans les réglages :
 
@@ -137,7 +140,7 @@ Paramètres de Windows > Applications. Les scènes, les réglages et les connexi
 ## Limites connues
 
 - Le son est isolé **par programme**, pas par onglet : tous les onglets d'un même profil de navigateur partagent la même piste. Une source navigateur par contenu à isoler suffit à le contourner.
-- Une fenêtre réduite dans la barre des tâches n'est plus dessinée par Windows : son image se fige. Une fenêtre cachée derrière d'autres s'enregistre normalement.
+- Une fenêtre réduite dans la barre des tâches n'est plus dessinée par Windows : son image se fige, et sa carte affiche « Réduite ». Le bouton « Rétablir la fenêtre » de la carte la ramène, même pendant l'enregistrement. Une fenêtre cachée derrière d'autres s'enregistre normalement.
 - Les contenus protégés (Netflix, Disney+…) apparaissent souvent en noir.
 - Certains jeux en plein écran exclusif donnent une image noire : préférer le mode « fenêtré sans bordure ».
 
@@ -149,13 +152,13 @@ La liste complète, les choix techniques et la feuille de route sont dans le [ca
 
 | Dossier | Rôle |
 |---|---|
-| `crates/polyptyque-core` | Scènes, sources, réglages, nommage, calculs de synchronisation, commandes FFmpeg ; le contrat `Platform` que chaque système doit remplir |
-| `crates/polyptyque-windows` | Implémentation Windows : capture d'image (Windows.Graphics.Capture) et de son (WASAPI), fenêtres, navigateurs, tubes, fermeture de session |
-| `crates/polyptyque-engine` | Sessions d'enregistrement : horloge commune, capture, encodeurs FFmpeg surveillés et relancés, conversion MP4 |
-| `crates/polyptyque-app` | Interface graphique : apparence dans `ui/` (thème dans `ui/theme.slint`), logique dans `src/`, mises à jour |
+| `crates/polyptyque-core` | Scènes, sources, réglages et leurs sauvegardes, nommage, calculs de synchronisation, commandes FFmpeg, version portable, journal de la session en cours ; le contrat `Platform` que chaque système doit remplir |
+| `crates/polyptyque-windows` | Implémentation Windows : capture d'image (Windows.Graphics.Capture) et de son (WASAPI), fenêtres, navigateurs, tubes, copie unique, veille et fermeture de session |
+| `crates/polyptyque-engine` | Sessions d'enregistrement : horloge commune, capture, encodeurs FFmpeg surveillés et relancés, dossier de secours, conversion MP4 et réparation des fichiers coupés net |
+| `crates/polyptyque-app` | Interface graphique : apparence dans `ui/` (thème dans `ui/theme.slint`), logique dans `src/` (dont le bilan après un incident), mises à jour |
 | `crates/polyptyque-cli` | Version en console, livrée pour le diagnostic |
 | `assets/logo` | Logo et icônes, générés par `generer.py` |
-| `docs` | Cahier des charges et captures d'écran |
+| `docs` | Cahier des charges, analyse des risques, fiches de test et captures d'écran |
 
 Seule `polyptyque-windows` dépend du système : un portage vers macOS ou Linux consistera à écrire son équivalent.
 
@@ -171,9 +174,17 @@ Les sessions simulées rejouent des enregistrements complets avec de fausses fen
 - les durées et la synchronisation des fichiers ;
 - la conversion MP4 ;
 - l'enregistrement source par source ;
-- la reprise après un plantage ou un blocage réel de FFmpeg.
+- la reprise après un plantage ou un blocage réel de FFmpeg, et la réparation du fichier coupé net ;
+- la suite de l'enregistrement dans le dossier de secours quand le dossier choisi disparaît ;
+- le passage sur le processeur quand la carte graphique refuse un encodage.
 
-Le mode démonstration permet de développer l'interface sans Windows.
+Le mode démonstration permet de développer l'interface sans Windows. Des variables d'environnement y simulent des situations à tester :
+
+| Variable | Situation simulée |
+|---|---|
+| `POLYPTYQUE_DEMO_REDUITE` | La fenêtre de Discord est réduite |
+| `POLYPTYQUE_DEMO_PERDUE` | La fenêtre de Chrome est fermée |
+| `POLYPTYQUE_DEMO_MISE_A_JOUR` | Une nouvelle version est disponible |
 
 **Branches et fabrication**
 - `dev` reçoit le travail en cours ; `main` reçoit les versions validées.
