@@ -101,8 +101,12 @@ jobs:
           "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
           "BETA=$beta" | Out-File -FilePath $env:GITHUB_ENV -Append
           "TITLE=$title" | Out-File -FilePath $env:GITHUB_ENV -Append
-          $pre = if ($beta) { @('--pre') } else { @() }
-          $releaseNotes = if (Test-Path $notes) { @('--releaseNotes', $notes) } else { @() }
+          # Options facultatives, en listes : PowerShell transformerait une
+          # liste d'un seul élément en simple texte, passé lettre par lettre.
+          $pre = @()
+          if ($beta) { $pre += '--pre' }
+          $releaseNotes = @()
+          if (Test-Path $notes) { $releaseNotes += '--releaseNotes', $notes }
           $repo = "https://github.com/${{ github.repository }}"
           if ("${{ github.ref_type }}" -eq "tag") {
             if ("${{ github.ref_name }}" -ne "v$version") {
@@ -133,7 +137,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $pre = if ($env:BETA -eq 'True') { @('--pre') } else { @() }
+          $pre = @()
+          if ($env:BETA -eq 'True') { $pre += '--pre' }
           vpk upload github --repoUrl "https://github.com/${{ github.repository }}" --token $env:GITHUB_TOKEN `
             --outputDir releases --tag "v$env:VERSION" --releaseName "$env:TITLE" --publish @pre
           if ($LASTEXITCODE -ne 0) { throw "publication échouée" }
