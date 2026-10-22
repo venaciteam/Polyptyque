@@ -13,6 +13,26 @@
   <img src="docs/captures/interface-enregistrement.png" alt="Polyptyque pendant un enregistrement : trois sources, chacune avec son aperçu, son niveau sonore et la taille de son fichier" width="860">
 </p>
 
+<!--
+  Liens épinglés sur la bêta : releases/latest/download/ ignore les préversions
+  et renvoie 404 tant qu'aucune version stable n'est publiée. À chaque nouvelle
+  bêta, mettre à jour l'étiquette et la ligne de version. À la sortie de la
+  1.0.0 stable, passer aux adresses permanentes :
+  https://github.com/venaciteam/polyptyque/releases/latest/download/Polyptyque-Setup.exe
+  https://github.com/venaciteam/polyptyque/releases/latest/download/Polyptyque-portable.zip
+-->
+
+## Télécharger
+
+**Windows 10 et 11** (64 bits), version 1.0 bêta 1 :
+
+- **[Télécharger l'installateur](https://github.com/venaciteam/polyptyque/releases/download/v1.0.0-beta.1/Polyptyque-Setup.exe)** : la version classique, qui s'installe comme un logiciel habituel. Dans le doute, choisir celle-ci.
+- **[Télécharger la version portable](https://github.com/venaciteam/polyptyque/releases/download/v1.0.0-beta.1/Polyptyque-portable.zip)** : sans installation, à décompresser dans le dossier de son choix, même sur une clé USB.
+
+macOS et Linux : pas encore disponibles.
+
+Configuration requise et message de Windows au premier lancement : voir [Installation](#installation).
+
 ---
 
 ## Sommaire
