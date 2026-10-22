@@ -1,10 +1,12 @@
-name: Vérifications et fabrication
+name: Fabrication
 
 on:
   push:
   pull_request:
   workflow_dispatch:
 
+# Fabrication seule : vérification du code et tests se lancent en local,
+# sous Windows, avant chaque publication.
 # Publication d'une version (étiquette « v1.2.3 ») : création de la page de
 # version GitHub, d'où Polyptyque télécharge ses mises à jour.
 permissions:
@@ -24,29 +26,6 @@ env:
   PACK_ID: PolyptyqueApp
 
 jobs:
-  tests:
-    name: Tests (Linux, simulation complète avec FFmpeg)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Outils
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -y -q ffmpeg libfontconfig1-dev libxkbcommon-dev
-          rustup toolchain install stable --profile minimal --component rustfmt,clippy
-          rustup default stable
-      # Bibliothèques externes déjà compilées, gardées d'une fabrication à
-      # l'autre. Jamais pour une publication : la version publiée est
-      # fabriquée entièrement.
-      - uses: Swatinem/rust-cache@v2
-        if: github.ref_type != 'tag'
-      - name: Mise en forme
-        run: cargo fmt --all -- --check
-      - name: Analyse
-        run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: Tests
-        run: cargo test --workspace
-
   windows:
     name: Fabrication Windows
     runs-on: windows-latest
@@ -54,17 +33,13 @@ jobs:
       - uses: actions/checkout@v4
       - name: Outils
         run: |
-          rustup toolchain install stable --profile minimal --component clippy
+          rustup toolchain install stable --profile minimal
           rustup default stable
       # Bibliothèques externes déjà compilées, gardées d'une fabrication à
       # l'autre. Jamais pour une publication : la version publiée est
       # fabriquée entièrement.
       - uses: Swatinem/rust-cache@v2
         if: github.ref_type != 'tag'
-      - name: Analyse
-        run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: Tests
-        run: cargo test --workspace
       - name: Compilation
         run: cargo build --release -p polyptyque-app -p polyptyque-cli
       - name: Téléchargement de FFmpeg

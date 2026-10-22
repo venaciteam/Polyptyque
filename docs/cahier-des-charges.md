@@ -517,7 +517,7 @@ La session simulée (`polyptyque-engine/tests`) rejoue des enregistrements compl
 | Interface | [[Slint]] | Apparence décrite dans des fichiers `.slint` séparés de la logique ; compatible GPL v3 ; accessibilité via AccessKit ; aperçus par tampons d'image |
 | Installateur | [[Velopack]] | Un seul `Polyptyque-Setup.exe`, sans question, mises à jour automatiques |
 | Sauvegarde des scènes | Fichier de configuration dans `%APPDATA%\Polyptyque` | |
-| Fabrication des exécutables | GitHub Actions sur machine Windows | |
+| Fabrication des exécutables | GitHub Actions sur machine Windows (fabrication seule) | Vérification du code et tests en local, sous Windows, avant chaque publication |
 
 ### Portage macOS et Linux
 
@@ -633,6 +633,7 @@ Seule une implémentation de `Platform` est à écrire pour chaque système (`po
 | 2026-10-22 | Fenêtres de la scène : ouvertes au lancement de Polyptyque (réglage, activé par défaut), ou d'un clic avec « Ouvrir les fenêtres », ou une par une ; rien n'est ouvert au changement de scène. Un programme en train de s'ouvrir n'est jamais relancé (20 s) |
 | 2026-10-22 | Version portable : données dans `données` à la racine du dossier décompressé, hors du dossier `current` que les mises à jour remplacent |
 | 2026-10-22 | Première publication : 1.0.0-beta.1, en préversion GitHub, pour éprouver la mise à jour automatique ; canal de mises à jour au choix (stables, ou stables et bêta). La 1.0 stable suivra, puis le portage Linux et macOS |
+| 2026-10-22 | Fabrication GitHub réduite à la compilation et à l'installateur (avec cache) : vérification du code et tests (`cargo clippy`, `cargo test`) lancés en local sous Windows avant chaque publication |
 
 ---
 
