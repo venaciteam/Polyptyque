@@ -141,9 +141,14 @@ export global Bridge {
     // Mises à jour : 0 versions stables, 1 stables et bêta, 2 ne pas rechercher.
     in-out property <int> settings-update-index;
     in-out property <bool> settings-open-windows;
+    in-out property <bool> settings-close-browsers;
     in-out property <bool> settings-mic;
     in property <[string]> mic-choices;
     in-out property <int> mic-index;
+    // Test du micro choisi, pendant que les réglages sont ouverts.
+    in property <float> mic-test-level;
+    in property <bool> mic-test-sound;
+    in property <string> mic-test-error;
     in property <[string]> hotkey-choices;
     in-out property <int> hotkey-record-index;
     in-out property <int> hotkey-show-index;

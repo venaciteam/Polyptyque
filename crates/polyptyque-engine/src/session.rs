@@ -13,9 +13,9 @@ use anyhow::{bail, Context, Result};
 use crossbeam_channel::unbounded;
 use polyptyque_core::config::{new_id, Settings, Source, CHANNELS, SAMPLE_RATE};
 use polyptyque_core::encoder::{bytes_per_hour, EncoderChoice};
+use polyptyque_core::level::RECENT_SOUND_HNS;
 use polyptyque_core::naming::{self, NameParts};
 use polyptyque_core::platform::{Nv12Frame, Platform};
-use polyptyque_core::timeline::HNS_PER_SEC;
 
 use crate::audio_task::{AudioInput, AudioTask};
 use crate::output::{clock, OutputPlan, OutputTask};
@@ -24,8 +24,6 @@ use crate::video_task::VideoTask;
 
 /// À l'arrêt, délai accordé aux fils de capture pour se terminer.
 const CAPTURE_JOIN_TIMEOUT: Duration = Duration::from_secs(10);
-/// Le son est « actif » s'il a été entendu dans ce délai.
-const RECENT_SOUND_HNS: u64 = 2 * HNS_PER_SEC;
 
 pub struct SessionPlan {
     pub scene_name: String,

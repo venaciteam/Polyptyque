@@ -1,6 +1,6 @@
 //! Reconnaissance et lancement des fenêtres des sources.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::fs;
 use std::path::Path;
@@ -52,6 +52,42 @@ pub fn find_window(platform: &dyn Platform, source: &Source, windows: &[WindowIn
                 .map(|w| (*w).clone())
         }
     }
+}
+
+/// Fenêtres des navigateurs des sources (leurs profils dédiés), à fermer en
+/// quittant Polyptyque. Les applications n'en font jamais partie.
+///
+/// Un navigateur ne restaure au lancement suivant que la dernière fenêtre
+/// fermée de son profil : pour chaque profil, la fenêtre de la source (celle
+/// que retient [`find_window`]) vient donc en dernier.
+pub fn browser_windows(platform: &dyn Platform, sources: &[Source], windows: &[WindowInfo]) -> Vec<WindowInfo> {
+    let mut command_lines: HashMap<u32, Option<String>> = HashMap::new();
+    let mut taken: HashSet<isize> = HashSet::new();
+    let mut found = Vec::new();
+    for source in sources {
+        let SourceKind::Browser { profile_dir, browser, .. } = &source.kind else {
+            continue;
+        };
+        let class = window_class(browser.family);
+        let mut profile: Vec<WindowInfo> = windows
+            .iter()
+            .filter(|w| w.class == class && !taken.contains(&w.handle))
+            .filter(|w| {
+                command_lines
+                    .entry(w.pid)
+                    .or_insert_with(|| platform.process_command_line(w.pid))
+                    .as_deref()
+                    .is_some_and(|line| command_line_uses_profile(line, profile_dir))
+            })
+            .cloned()
+            .collect();
+        if profile.len() > 1 {
+            profile.rotate_left(1);
+        }
+        taken.extend(profile.iter().map(|w| w.handle));
+        found.extend(profile);
+    }
+    found
 }
 
 /// Étapes de la préparation des fenêtres avant un enregistrement.
@@ -316,6 +352,38 @@ mod tests {
             },
         });
         assert_eq!(find_window(&FakePlatform, &src, &windows).map(|w| w.handle), Some(2));
+    }
+
+    #[test]
+    fn browser_windows_to_close_keep_the_source_window_last() {
+        let windows = vec![
+            window(1, 11, "Seconde fenêtre", "MozillaWindowClass", r"C:\ff\firefox.exe"),
+            window(2, 10, "Autre profil", "MozillaWindowClass", r"C:\ff\firefox.exe"),
+            window(3, 11, "Fenêtre de la source", "MozillaWindowClass", r"C:\ff\firefox.exe"),
+            window(4, 12, "Discord", "Chrome_WidgetWin_1", r"C:\Discord\Discord.exe"),
+        ];
+        let browser = source(SourceKind::Browser {
+            profile_dir: PathBuf::from(r"C:\p\abc"),
+            start_url: None,
+            browser: BrowserRef {
+                name: "Firefox".into(),
+                exe_path: PathBuf::from(r"C:\ff\firefox.exe"),
+                family: BrowserFamily::Gecko,
+            },
+        });
+        let application = source(SourceKind::Application {
+            exe_path: r"C:\Discord\Discord.exe".into(),
+            window_class: "Chrome_WidgetWin_1".into(),
+            window_title: "Discord".into(),
+            launch_args: vec![],
+        });
+        // La même source dans deux scènes : ses fenêtres ne sont comptées qu'une fois.
+        let sources = [browser.clone(), application, browser];
+        let handles: Vec<isize> =
+            browser_windows(&FakePlatform, &sources, &windows).iter().map(|w| w.handle).collect();
+        // `find_window` retient la première dans l'ordre d'empilement (1) :
+        // elle passe en dernier.
+        assert_eq!(handles, vec![3, 1]);
     }
 
     #[test]

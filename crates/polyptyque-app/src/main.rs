@@ -8,6 +8,7 @@ mod convert;
 #[cfg(not(windows))]
 mod demo;
 mod format;
+mod meter;
 mod preview;
 mod update;
 

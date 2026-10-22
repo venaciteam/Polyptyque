@@ -3,7 +3,7 @@
 import { ComboBox, LineEdit, CheckBox, ListView, Spinner } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import { Bridge } from "bridge.slint";
-import { ActionButton, Field, Footer, Note, Sheet, ListRow, Toggle } from "components.slint";
+import { ActionButton, Field, Footer, LevelMeter, Note, Sheet, ListRow, Toggle } from "components.slint";
 
 export component AddBrowserSheet inherits Sheet {
     title: "Ajouter une source navigateur";
@@ -343,6 +343,25 @@ export component SettingsSheet inherits Sheet {
                 model: Bridge.mic-choices;
                 current-index <=> Bridge.mic-index;
             }
+            // Le micro choisi est écouté tant que les réglages sont ouverts.
+            if Bridge.settings-mic: HorizontalLayout {
+                spacing: 10px;
+                LevelMeter {
+                    width: 120px;
+                    y: (parent.height - self.height) / 2;
+                    level: Bridge.mic-test-level;
+                    active: Bridge.mic-test-sound;
+                }
+                Text {
+                    horizontal-stretch: 1;
+                    text: Bridge.mic-test-error != "" ? Bridge.mic-test-error
+                        : Bridge.mic-test-sound ? "Son capté" : "Aucun son capté : parle pour vérifier";
+                    color: Bridge.mic-test-error != "" ? Theme.warning : Theme.text-faint;
+                    font-size: Theme.font-small;
+                    vertical-alignment: center;
+                    wrap: word-wrap;
+                }
+            }
             if Bridge.settings-mic: Note {
                 text: "Le son de ce micro sera enregistré pendant chaque enregistrement, dans son propre fichier (.mka), calé sur les vidéos. Windows doit autoriser l'accès au micro pour les applications de bureau.";
             }
@@ -404,6 +423,13 @@ export component SettingsSheet inherits Sheet {
                 checked: Bridge.settings-open-windows;
                 toggled(value) => {
                     Bridge.settings-open-windows = value;
+                }
+            }
+            Toggle {
+                text: "Fermer les navigateurs des sources en quittant";
+                checked: Bridge.settings-close-browsers;
+                toggled(value) => {
+                    Bridge.settings-close-browsers = value;
                 }
             }
             Field {

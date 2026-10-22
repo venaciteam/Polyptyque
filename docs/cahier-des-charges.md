@@ -189,6 +189,10 @@ Au lancement de Polyptyque (réglage « Ouvrir les fenêtres de la scène au lan
 > [!tip] Pourquoi c'est fiable pour les navigateurs
 > L'identifiant d'une fenêtre change à chaque ouverture, et le titre d'une fenêtre de navigateur change avec l'onglet affiché. Le dossier de profil, lui, ne change jamais : c'est la clé de reconnaissance.
 
+**Fermeture avec Polyptyque** (réglage « Fermer les navigateurs des sources en quittant », activé par défaut) : en quittant Polyptyque, toutes les fenêtres des profils dédiés, toutes scènes confondues, reçoivent une demande de fermeture, comme un clic sur leur croix. Le navigateur enregistre sa session (onglets rouverts au lancement suivant) et peut demander confirmation pour une page non enregistrée. Les applications ne sont jamais fermées, ni le navigateur personnel (autre profil, autre processus).
+- Un navigateur ne rouvre que la **dernière fenêtre fermée** de son profil : la fenêtre de la source est fermée en dernier, les autres restent dans « Fenêtres récemment fermées ».
+- Rien n'est fermé à la fermeture de la session Windows (Windows ferme lui-même les navigateurs, s'en mêler ferait perdre des fenêtres), ni au redémarrage pour une mise à jour, ni après un plantage.
+
 ### Enregistrement
 
 - **Bouton global** : démarre toutes les sources de la scène active **au même instant**, sur une **horloge commune**.
@@ -221,6 +225,7 @@ Au lancement de Polyptyque (réglage « Ouvrir les fenêtres de la scène au lan
 - Enregistré dans un **fichier audio séparé**, sur la même horloge que les vidéos, pendant toute la durée de l'enregistrement.
 - Micro débranché puis rebranché : repris automatiquement (silence en attendant).
 - Accès refusé par Windows (réglage de confidentialité) : détecté et expliqué, avec un raccourci vers le bon écran des Paramètres.
+- **Test dans les réglages** : sous la liste des micros, un indicateur de niveau montre si le micro choisi capte du son (avant même d'enregistrer les réglages) ; une erreur d'accès s'y affiche directement. Le micro n'est écouté que pendant que les réglages sont ouverts avec le micro activé : jamais en permanence, pour que l'icône « micro utilisé » de Windows ne reste pas allumée.
 
 > [!info] Format du fichier micro
 > Pendant l'enregistrement : Matroska audio (`…_Micro.mka`, son AAC), avec la même robustesse que les vidéos. Le WAV classique était exclu : limité à 4 Go, soit environ 6 h en stéréo 48 kHz 16 bits.
@@ -317,6 +322,7 @@ Inspirée d'[[OBS Studio]], volontairement allégée, thème sombre.
 > ![Ajout d'une source navigateur](captures/interface-ajout-navigateur.png)
 > ![Ajout d'une source application](captures/interface-ajout-application.png)
 - Par source : nom, état, cadence réelle, indicateur de niveau sonore, durée, taille du fichier, bouton d'enregistrement individuel.
+- Niveau sonore affiché **en permanence**, pas seulement pendant l'enregistrement : chaque source écoute le son de son programme (même capture que l'enregistrement, seule la crête est gardée). Dès que le moteur écoute la source (enregistrement, préparation, finalisation), cette écoute s'arrête et la carte affiche le niveau du moteur. Indépendant du réglage des aperçus.
 - Barre du haut : pastille du micro (avec son niveau pendant l'enregistrement) et pastille de la conversion MP4 en cours.
 - **Barre d'état** : espace disque libre, autonomie estimée, charge processeur et carte graphique, images perdues.
 - **Fenêtre de paramètres** : Sortie, Encodage, Audio, Raccourcis, Général.
@@ -636,6 +642,10 @@ Seule une implémentation de `Platform` est à écrire pour chaque système (`po
 | 2026-10-22 | Première publication : 1.0.0-beta.1, en préversion GitHub, pour éprouver la mise à jour automatique ; canal de mises à jour au choix (stables, ou stables et bêta). La 1.0 stable suivra, puis le portage Linux et macOS |
 | 2026-10-22 | Fabrication GitHub réduite à la compilation et à l'installateur (avec cache) : vérification du code et tests (`cargo clippy`, `cargo test`) lancés en local sous Windows avant chaque publication |
 | 2026-10-22 | Liens de téléchargement directs en tête du README, épinglés sur la bêta 1 ; passage aux adresses `releases/latest/download/` à la sortie de la 1.0.0 stable |
+| 2026-10-22 | Navigateurs des sources fermés en quittant Polyptyque (réglage, activé par défaut, toutes scènes) : demande de fermeture comme leur croix, fenêtre de la source en dernier ; jamais à la fermeture de la session Windows |
+| 2026-10-22 | Niveau sonore des sources affiché en permanence (comme OBS), par une écoute légère suspendue dès que le moteur écoute la source ; micro exclu (icône « micro utilisé » de Windows sinon allumée en permanence) |
+| 2026-10-22 | Test du micro dans les réglages : niveau du micro choisi, écouté seulement réglages ouverts |
+| 2026-10-22 | Publication de la 1.0.0-beta.2 (préversion) : niveau sonore permanent, fermeture des navigateurs des sources, test du micro |
 
 ---
 

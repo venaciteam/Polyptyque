@@ -35,6 +35,7 @@ use slint::{CloseRequestResponse, ComponentHandle, Image, Model, ModelRc, Shared
 
 use crate::convert::{ConversionEvent, Converter, JobKind};
 use crate::format;
+use crate::meter::{MicMeter, SourceMeters};
 use crate::preview::{self, PreviewManager, PreviewState};
 use crate::update;
 use crate::{AppWindow, Bridge, IncidentFile, SceneItem, SourceCard, SourceItem, WindowItem};
@@ -148,6 +149,10 @@ pub struct App {
     stop_thread: RefCell<Option<thread::JoinHandle<()>>>,
     busy: Cell<bool>,
     previews: RefCell<PreviewManager>,
+    /// Niveau sonore des sources que le moteur n'écoute pas.
+    meters: RefCell<SourceMeters>,
+    /// Test du micro, pendant que les réglages sont ouverts.
+    mic_meter: RefCell<Option<MicMeter>>,
     /// Définition actuelle des aperçus, et celle qui attend d'être confirmée
     /// (avec le nombre de mesures concordantes).
     preview_size: Cell<(u32, u32)>,
@@ -161,6 +166,9 @@ pub struct App {
     last_disk_check: Cell<Option<Instant>>,
     disk_check_running: Cell<bool>,
     quitting: Cell<bool>,
+    /// Windows ferme la session (arrêt, redémarrage, déconnexion) : il ferme
+    /// lui-même les navigateurs.
+    session_ending: Cell<bool>,
     /// Sources en cours de préparation pour rejoindre l'enregistrement.
     joining: RefCell<HashSet<String>>,
     /// Numéro de l'enregistrement en cours : une préparation commencée
@@ -276,6 +284,8 @@ pub fn run(platform: Arc<dyn Platform>, paths: Paths, initial: Option<Config>) -
         stop_thread: RefCell::new(None),
         busy: Cell::new(false),
         previews: RefCell::new(PreviewManager::default()),
+        meters: RefCell::new(SourceMeters::default()),
+        mic_meter: RefCell::new(None),
         preview_size: Cell::new(preview::default_size()),
         pending_preview_size: Cell::new(None),
         cards: Rc::new(VecModel::default()),
@@ -287,6 +297,7 @@ pub fn run(platform: Arc<dyn Platform>, paths: Paths, initial: Option<Config>) -
         last_disk_check: Cell::new(None),
         disk_check_running: Cell::new(false),
         quitting: Cell::new(false),
+        session_ending: Cell::new(false),
         joining: RefCell::new(HashSet::new()),
         session_number: Cell::new(0),
         converter: RefCell::new(None),
@@ -361,6 +372,8 @@ pub fn run(platform: Arc<dyn Platform>, paths: Paths, initial: Option<Config>) -
     ui.run().context("boucle de l'interface")?;
 
     app.previews.borrow_mut().stop();
+    app.meters.borrow_mut().stop();
+    app.mic_meter.borrow_mut().take();
     // Fermeture par le système pendant un enregistrement : on finalise.
     let session = app.session.borrow_mut().take();
     if let Some(session) = session {
@@ -370,6 +383,13 @@ pub fn run(platform: Arc<dyn Platform>, paths: Paths, initial: Option<Config>) -
     // Une conversion interrompue efface son fichier partiel ; le MKV reste.
     let converter = app.converter.borrow_mut().take();
     drop(converter);
+    // Fermeture voulue par l'utilisateur : les navigateurs des sources
+    // suivent. Jamais à la fermeture de la session Windows, qui les ferme
+    // elle-même : fermer leurs fenêtres en même temps ferait perdre celles
+    // que le navigateur doit rouvrir.
+    if !app.session_ending.get() && app.config.borrow().settings.close_browsers_at_exit {
+        app.close_source_browsers();
+    }
     APP.with(|a| a.borrow_mut().take());
     Ok(())
 }
@@ -713,12 +733,102 @@ impl App {
     // ----- Aperçus ---------------------------------------------------------
 
     fn restart_previews(&self) {
-        let config = self.config.borrow();
-        let mut previews = self.previews.borrow_mut();
-        previews.stop();
-        if config.settings.previews {
-            *previews = PreviewManager::start(&self.platform, &config.active_scene().sources, self.preview_size.get());
+        {
+            let config = self.config.borrow();
+            let mut previews = self.previews.borrow_mut();
+            previews.stop();
+            if config.settings.previews {
+                *previews =
+                    PreviewManager::start(&self.platform, &config.active_scene().sources, self.preview_size.get());
+            }
         }
+        // Les vumètres suivent les mêmes sources, même aperçus coupés.
+        self.restart_meters();
+    }
+
+    // ----- Vumètres --------------------------------------------------------
+
+    fn restart_meters(&self) {
+        let config = self.config.borrow();
+        let mut meters = self.meters.borrow_mut();
+        meters.stop();
+        *meters = SourceMeters::start(&self.platform, &config.active_scene().sources, |id| self.engine_listens(id));
+    }
+
+    /// Le moteur écoute déjà le son de cette source (enregistrement,
+    /// préparation, arrêt en cours) : sa carte affiche le niveau du moteur.
+    fn engine_listens(&self, id: &str) -> bool {
+        self.busy.get()
+            || self.joining.borrow().contains(id)
+            || self.session.borrow().as_ref().is_some_and(|s| s.is_recording(id))
+    }
+
+    /// Niveau des sources que le moteur n'écoute pas. `statuses` : état des
+    /// sources de l'enregistrement en cours (vide sans enregistrement).
+    fn tick_meters(&self, statuses: &[SourceStatus]) {
+        let busy = self.busy.get();
+        let now = self.platform.now_hns();
+        let joining = self.joining.borrow();
+        let meters = self.meters.borrow();
+        for meter in meters.meters() {
+            let id = meter.source_id.as_str();
+            let engine = busy
+                || joining.contains(id)
+                || statuses.iter().any(|s| s.id == id && s.state != SourceState::Finished);
+            meter.set_paused(engine);
+            if engine {
+                continue;
+            }
+            let (peak, recent) = meter.take(now);
+            let level = format::level(peak);
+            let Some(index) = (0..self.cards.row_count()).find(|&i| self.cards.row_data(i).is_some_and(|c| c.id == id))
+            else {
+                continue;
+            };
+            // Seulement si quelque chose change : la carte n'est pas redessinée pour rien.
+            if self.cards.row_data(index).is_some_and(|c| c.level != level || c.sound != recent) {
+                self.update_card(index, |card| {
+                    card.level = level;
+                    card.sound = recent;
+                });
+            }
+        }
+    }
+
+    /// Test du micro dans les réglages : écouté seulement pendant qu'ils sont
+    /// ouverts avec le micro activé, sur le micro choisi dans la liste (même
+    /// pas encore enregistré).
+    fn tick_mic_test(&self) {
+        let wanted: Option<Option<String>> = self.with_bridge_value(|b| {
+            (b.get_sheet() == "settings" && b.get_settings_mic() && !self.recording()).then(|| {
+                let index = b.get_mic_index().max(0) as usize;
+                self.mic_choices.borrow().get(index).map(|(id, _)| id.clone()).filter(|id| !id.is_empty())
+            })
+        });
+        let mut mic_meter = self.mic_meter.borrow_mut();
+        let Some(device) = wanted else {
+            *mic_meter = None;
+            return;
+        };
+        if mic_meter.as_ref().is_none_or(|m| m.device() != device.as_deref()) {
+            *mic_meter = Some(MicMeter::start(&self.platform, device));
+            self.with_bridge(|b| {
+                b.set_mic_test_level(0.0);
+                b.set_mic_test_sound(false);
+                b.set_mic_test_error(SharedString::new());
+            });
+            return;
+        }
+        let Some(meter) = mic_meter.as_ref() else {
+            return;
+        };
+        let (peak, recent) = meter.take(self.platform.now_hns());
+        let error = meter.error().unwrap_or_default();
+        self.with_bridge(|b| {
+            b.set_mic_test_level(format::level(peak));
+            b.set_mic_test_sound(recent);
+            b.set_mic_test_error(error.into());
+        });
     }
 
     /// Adapte la définition des aperçus à la taille des cartes. Un
@@ -870,6 +980,10 @@ impl App {
                 .enabled
                 .then(|| MicrophonePlan { device_id: config.settings.microphone.device().map(str::to_string) }),
         };
+        // Le moteur va écouter ces sources : leur écoute s'arrête avant.
+        for source in &scene.sources {
+            self.meters.borrow().pause(&source.id);
+        }
         match Session::start(self.platform.clone(), plan) {
             Ok(session) => {
                 self.mic_warned.set(false);
@@ -1002,6 +1116,7 @@ impl App {
             return;
         }
         self.joining.borrow_mut().remove(&source.id);
+        self.meters.borrow().pause(&source.id);
         let result = match self.session.borrow_mut().as_mut() {
             Some(session) => session.add_source(&source).map(|_| true),
             None => Ok(false),
@@ -1136,12 +1251,14 @@ impl App {
     fn tick_status(&self) {
         self.update_preview_size();
         self.watch_session_end();
+        self.tick_mic_test();
         let statuses: (Vec<SourceStatus>, Vec<PathBuf>) = {
             let mut session = self.session.borrow_mut();
             let Some(session) = session.as_mut() else {
                 // Emprunt rendu avant : la mesure du disque relit la session.
                 drop(session);
                 self.refresh_disk(false);
+                self.tick_meters(&[]);
                 return;
             };
             let elapsed = format::clock(session.elapsed());
@@ -1213,6 +1330,7 @@ impl App {
         }
         self.reopen_lost_windows(&statuses);
         self.refresh_disk(false);
+        self.tick_meters(&statuses);
     }
 
     /// Rouvre le programme d'une source dont la fenêtre a disparu pendant
@@ -2308,6 +2426,7 @@ impl App {
         };
         let mic_enabled = mic.enabled;
         let s_open_windows = s.open_windows_at_launch;
+        let s_close_browsers = s.close_browsers_at_exit;
         let mic_labels: Vec<SharedString> = mics.iter().map(|(_, name)| name.as_str().into()).collect();
         *self.mic_choices.borrow_mut() = mics;
         drop(config);
@@ -2334,6 +2453,7 @@ impl App {
             b.set_settings_convert(values.11);
             b.set_settings_update_index(values.12);
             b.set_settings_open_windows(s_open_windows);
+            b.set_settings_close_browsers(s_close_browsers);
             b.set_settings_mic(mic_enabled);
             b.set_mic_choices(ModelRc::new(VecModel::from(mic_labels)));
             b.set_mic_index(mic_index as i32);
@@ -2441,6 +2561,7 @@ impl App {
             }
             updates_after = update_choice(s);
             s.open_windows_at_launch = b.get_settings_open_windows();
+            s.close_browsers_at_exit = b.get_settings_close_browsers();
             s.microphone.enabled = b.get_settings_mic();
             if let Some((id, name)) = self.mic_choices.borrow().get(b.get_mic_index().max(0) as usize) {
                 if *id != s.microphone.device_id {
@@ -2603,7 +2724,29 @@ impl App {
             return CloseRequestResponse::KeepWindowShown;
         }
         self.previews.borrow_mut().stop();
+        self.meters.borrow_mut().stop();
+        self.mic_meter.borrow_mut().take();
         CloseRequestResponse::HideWindow
+    }
+
+    /// Ferme les fenêtres des navigateurs des sources, toutes scènes
+    /// confondues, comme un clic sur leur croix. Les applications restent
+    /// ouvertes.
+    fn close_source_browsers(&self) {
+        let sources: Vec<Source> =
+            self.config.borrow().scenes.iter().flat_map(|scene| scene.sources.iter().cloned()).collect();
+        let windows = self.platform.list_windows();
+        let targets = resolve::browser_windows(self.platform.as_ref(), &sources, &windows);
+        let mut closed = 0;
+        for window in &targets {
+            match self.platform.close_window(window.handle) {
+                Ok(()) => closed += 1,
+                Err(e) => log::warn!("fermeture d'une fenêtre de navigateur (processus {}) : {e:#}", window.pid),
+            }
+        }
+        if closed > 0 {
+            log::info!("{closed} fenêtre(s) de navigateur fermée(s) avec Polyptyque");
+        }
     }
 
     // ----- Fermeture de la session Windows ---------------------------------
@@ -2654,6 +2797,7 @@ impl App {
                     || self.stop_thread.try_borrow().map_or(true, |t| t.is_some())
             }
             SessionEnd::Ending => {
+                self.session_ending.set(true);
                 self.finalize_now();
                 false
             }

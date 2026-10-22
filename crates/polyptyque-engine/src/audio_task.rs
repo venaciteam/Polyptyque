@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use crossbeam_channel::Sender;
 use polyptyque_core::config::{CHANNELS, SAMPLE_RATE};
+use polyptyque_core::level::{peak_of, SOUND_THRESHOLD};
 use polyptyque_core::platform::{AudioCapture, AudioPacket, Platform};
 use polyptyque_core::timeline::{approximate_times, AudioTimeline, PacketTime, HNS_PER_SEC};
 
@@ -19,8 +20,6 @@ const RETRY_HNS: u64 = 2 * HNS_PER_SEC;
 /// Un horodatage qui s'écarte de plus d'une seconde de l'heure de
 /// réception n'est pas dans la base de temps attendue : on l'ignore.
 const MAX_TIMESTAMP_SKEW_HNS: u64 = HNS_PER_SEC;
-/// En dessous, le son est considéré comme muet pour l'affichage.
-const SOUND_THRESHOLD: f32 = 0.0005;
 
 /// Origine du son.
 pub(crate) enum AudioInput {
@@ -191,8 +190,4 @@ impl AudioTask {
             stats.stuffed_frames
         );
     }
-}
-
-fn peak_of(data: &[u8]) -> f32 {
-    data.chunks_exact(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]).abs()).fold(0.0, f32::max)
 }

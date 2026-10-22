@@ -82,6 +82,13 @@ pub trait Platform: Send + Sync {
     fn restore_window(&self, _handle: WindowHandle) -> anyhow::Result<()> {
         anyhow::bail!("non disponible sur ce système")
     }
+
+    /// Demande à une fenêtre de se fermer, comme un clic sur sa croix : son
+    /// programme enregistre sa session, ou demande confirmation s'il a des
+    /// données non enregistrées. N'attend pas la fermeture.
+    fn close_window(&self, _handle: WindowHandle) -> anyhow::Result<()> {
+        anyhow::bail!("non disponible sur ce système")
+    }
     fn process_command_line(&self, pid: u32) -> Option<String>;
     fn detect_browsers(&self) -> Vec<BrowserInstall>;
 
