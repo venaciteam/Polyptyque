@@ -1,5 +1,5 @@
-POLYPTYQUE - VERSION D'ESSAI
-============================
+POLYPTYQUE 1.0 BÊTA 1
+=====================
 
 Polyptyque enregistre plusieurs fenêtres en même temps, chacune dans son
 propre fichier, avec uniquement le son de cette fenêtre.
@@ -8,7 +8,8 @@ Installation
 ------------
 Polyptyque-Setup.exe installe Polyptyque sans question ni droits
 administrateur (raccourcis sur le Bureau et dans le menu Démarrer). Les
-nouvelles versions sont proposées d'un clic dans Polyptyque. La
+nouvelles versions sont proposées d'un clic dans Polyptyque (Réglages >
+Mises à jour : versions stables, ou stables et bêta). La
 désinstallation (Paramètres de Windows > Applications) conserve scènes,
 réglages et connexions des navigateurs.
 

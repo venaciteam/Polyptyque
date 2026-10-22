@@ -87,19 +87,35 @@ jobs:
           $env:PATH = "$env:USERPROFILE\.dotnet\tools;$env:PATH"
           "$env:USERPROFILE\.dotnet\tools" | Out-File -FilePath $env:GITHUB_PATH -Append
           $version = ((cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages | Where-Object name -eq "polyptyque-app").version
+          # Une version à tiret (« 1.0.0-beta.1 ») est une bêta : publiée comme
+          # préversion GitHub, proposée seulement aux copies réglées sur
+          # « Versions stables et bêta ».
+          $core, $suffix = $version.Split('+')[0].Split('-', 2)
+          $beta = [bool]$suffix
+          $numbers = $core.Split('.')
+          $title = "Polyptyque $($numbers[0]).$($numbers[1])"
+          if ($numbers[2] -ne '0') { $title += ".$($numbers[2])" }
+          if ($suffix -match '^beta\.(\d+)$') { $title += " bêta $($Matches[1])" } elseif ($beta) { $title += " $suffix" }
+          $notes = "packaging/notes/v$version.md"
+          Write-Host "Version $version, page « $title », bêta : $beta, notes : $(Test-Path $notes)"
           "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "BETA=$beta" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "TITLE=$title" | Out-File -FilePath $env:GITHUB_ENV -Append
+          $pre = if ($beta) { @('--pre') } else { @() }
+          $releaseNotes = if (Test-Path $notes) { @('--releaseNotes', $notes) } else { @() }
           $repo = "https://github.com/${{ github.repository }}"
           if ("${{ github.ref_type }}" -eq "tag") {
             if ("${{ github.ref_name }}" -ne "v$version") {
               throw "L'étiquette ${{ github.ref_name }} ne correspond pas à la version $version (Cargo.toml)."
             }
+            if (-not (Test-Path $notes)) { throw "Notes de version manquantes : $notes" }
             # Version précédente : permet des mises à jour partielles, plus légères.
-            vpk download github --repoUrl $repo --token $env:GITHUB_TOKEN --outputDir releases
+            vpk download github --repoUrl $repo --token $env:GITHUB_TOKEN --outputDir releases @pre
           }
           vpk pack --packId $env:PACK_ID --packVersion $version --packDir dist/Polyptyque `
             --mainExe polyptyque.exe --packTitle Polyptyque --packAuthors Polyptyque `
             --icon assets/logo/polyptyque.ico --splashImage assets/logo/installation.gif `
-            --runtime win10.0.19041-x64 --outputDir releases
+            --runtime win10.0.19041-x64 @releaseNotes --outputDir releases
           if ($LASTEXITCODE -ne 0) { throw "vpk pack a échoué" }
           Get-ChildItem releases
           New-Item -ItemType Directory -Force -Path livraison | Out-Null
@@ -115,7 +131,19 @@ jobs:
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          $pre = if ($env:BETA -eq 'True') { @('--pre') } else { @() }
           vpk upload github --repoUrl "https://github.com/${{ github.repository }}" --token $env:GITHUB_TOKEN `
-            --outputDir releases --tag "v$env:VERSION" --releaseName "Polyptyque $env:VERSION" --publish
+            --outputDir releases --tag "v$env:VERSION" --releaseName "$env:TITLE" --publish @pre
           if ($LASTEXITCODE -ne 0) { throw "publication échouée" }
+          # Installateur et version portable sous les noms du README. La mise
+          # à jour automatique n'utilise que les paquets (.nupkg) et
+          # releases.win.json, qui gardent leur nom.
+          gh release upload "v$env:VERSION" livraison/Polyptyque-Setup.exe livraison/Polyptyque-portable.zip `
+            --repo "${{ github.repository }}"
+          if ($LASTEXITCODE -ne 0) { throw "envoi de l'installateur et de la version portable échoué" }
+          foreach ($asset in "$env:PACK_ID-win-Setup.exe", "$env:PACK_ID-win-Portable.zip") {
+            gh release delete-asset "v$env:VERSION" $asset --repo "${{ github.repository }}" --yes
+            if ($LASTEXITCODE -ne 0) { throw "suppression de $asset échouée" }
+          }

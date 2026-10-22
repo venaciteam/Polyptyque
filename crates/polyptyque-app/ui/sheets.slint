@@ -417,11 +417,12 @@ export component SettingsSheet inherits Sheet {
                     }
                 }
             }
-            Toggle {
-                text: "Rechercher les mises à jour";
-                checked: Bridge.settings-check-updates;
-                toggled(value) => {
-                    Bridge.settings-check-updates = value;
+            Field {
+                label: "Mises à jour";
+                hint: "Revenir aux versions stables ne réinstalle pas une version plus ancienne : la bêta reste jusqu'à la prochaine version stable.";
+                ComboBox {
+                    model: ["Versions stables", "Versions stables et bêta", "Ne pas rechercher"];
+                    current-index <=> Bridge.settings-update-index;
                 }
             }
             Field {

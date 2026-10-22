@@ -17,6 +17,10 @@ pub struct Available {
     pub version: String,
     /// Taille du téléchargement, en octets.
     pub size: u64,
+    /// Trouvée en cherchant aussi les bêtas : le téléchargement doit les
+    /// chercher de même.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    beta: bool,
     #[cfg(windows)]
     info: velopack::UpdateInfo,
 }
@@ -32,16 +36,19 @@ mod imp {
 
     use super::{Available, REPOSITORY};
 
-    fn manager() -> Result<UpdateManager> {
-        UpdateManager::new(GithubSource::new(REPOSITORY, None, false), None, None)
+    /// Les bêtas sont publiées comme préversions GitHub, que la source
+    /// ignore sauf si `beta`.
+    fn manager(beta: bool) -> Result<UpdateManager> {
+        UpdateManager::new(GithubSource::new(REPOSITORY, None, beta), None, None)
             .map_err(|e| anyhow!("Polyptyque n'a pas été installé par son installateur ({e})"))
     }
 
-    pub fn check() -> Result<Option<Available>> {
-        match manager()?.check_for_updates().map_err(|e| anyhow!("{e}"))? {
+    pub fn check(beta: bool) -> Result<Option<Available>> {
+        match manager(beta)?.check_for_updates().map_err(|e| anyhow!("{e}"))? {
             UpdateCheck::UpdateAvailable(info) => Ok(Some(Available {
                 version: info.TargetFullRelease.Version.clone(),
                 size: info.TargetFullRelease.Size,
+                beta,
                 info: *info,
             })),
             UpdateCheck::NoUpdateAvailable | UpdateCheck::RemoteIsEmpty => Ok(None),
@@ -49,7 +56,7 @@ mod imp {
     }
 
     pub fn download(update: &Available, progress: &dyn Fn(f32)) -> Result<()> {
-        let manager = manager()?;
+        let manager = manager(update.beta)?;
         let info = update.info.clone();
         let (sender, receiver) = mpsc::channel::<i16>();
         let worker = thread::spawn(move || manager.download_updates(&info, Some(sender)));
@@ -62,7 +69,7 @@ mod imp {
     /// Quitte Polyptyque, installe la nouvelle version et la relance. Ne
     /// revient qu'en cas d'échec.
     pub fn apply(update: &Available) -> Result<()> {
-        manager()?.apply_updates_and_restart(&update.info).map_err(|e| anyhow!("{e}"))
+        manager(update.beta)?.apply_updates_and_restart(&update.info).map_err(|e| anyhow!("{e}"))
     }
 }
 
@@ -77,9 +84,12 @@ mod imp {
 
     use super::Available;
 
-    pub fn check() -> Result<Option<Available>> {
-        Ok(std::env::var_os("POLYPTYQUE_DEMO_MISE_A_JOUR")
-            .map(|_| Available { version: "0.2.0".into(), size: 74_000_000 }))
+    pub fn check(beta: bool) -> Result<Option<Available>> {
+        Ok(std::env::var_os("POLYPTYQUE_DEMO_MISE_A_JOUR").map(|_| Available {
+            version: if beta { "1.1.0-beta.1" } else { "1.1.0" }.into(),
+            size: 74_000_000,
+            beta,
+        }))
     }
 
     pub fn download(_: &Available, progress: &dyn Fn(f32)) -> Result<()> {
@@ -95,10 +105,10 @@ mod imp {
     }
 }
 
-/// Recherche une nouvelle version (accès réseau : à appeler hors du fil de
-/// l'interface).
-pub fn check() -> Result<Option<Available>> {
-    imp::check()
+/// Recherche une nouvelle version, bêtas comprises si `beta` (accès
+/// réseau : à appeler hors du fil de l'interface).
+pub fn check(beta: bool) -> Result<Option<Available>> {
+    imp::check(beta)
 }
 
 /// Télécharge la nouvelle version ; `progress` reçoit l'avancement (0 à 1).

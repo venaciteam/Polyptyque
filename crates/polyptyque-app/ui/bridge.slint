@@ -138,7 +138,8 @@ export global Bridge {
     in-out property <string> template;
     in-out property <bool> settings-previews;
     in-out property <bool> settings-convert;
-    in-out property <bool> settings-check-updates;
+    // Mises à jour : 0 versions stables, 1 stables et bêta, 2 ne pas rechercher.
+    in-out property <int> settings-update-index;
     in-out property <bool> settings-open-windows;
     in-out property <bool> settings-mic;
     in property <[string]> mic-choices;

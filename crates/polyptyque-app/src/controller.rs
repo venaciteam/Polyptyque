@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 use anyhow::{anyhow, Context, Result};
 use polyptyque_core::browsers::{classify_executable, is_tor_browser, program_name};
 use polyptyque_core::config::{
-    BrowserFamily, BrowserRef, Codec, Config, HardwarePreference, Scene, Source, SourceKind,
+    BrowserFamily, BrowserRef, Codec, Config, HardwarePreference, Scene, Settings, Source, SourceKind, UpdateChannel,
 };
 use polyptyque_core::encoder::{bytes_per_hour, EncoderChoice};
 use polyptyque_core::hotkeys;
@@ -57,6 +57,10 @@ const TOAST_DURATION: Duration = Duration::from_secs(7);
 /// deux recherches (pour les sessions longues).
 const UPDATE_FIRST_CHECK: Duration = Duration::from_secs(5);
 const UPDATE_CHECK_INTERVAL: Duration = Duration::from_secs(6 * 3600);
+/// Choix « Mises à jour » des réglages : 0 versions stables, 1 stables et
+/// bêta, 2 ne pas rechercher.
+const UPDATES_OFF: i32 = 2;
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Raison affichée par Windows si l'on éteint pendant un enregistrement.
 #[cfg(windows)]
 const SHUTDOWN_REASON: &str = "Enregistrement en cours : arrête-le dans Polyptyque pour finaliser les fichiers.";
@@ -314,8 +318,8 @@ pub fn run(platform: Arc<dyn Platform>, paths: Paths, initial: Option<Config>) -
     let bridge = ui.global::<Bridge>();
     // Version portable : on le signale, avec l'emplacement de ses données.
     let version = match paths::portable_root() {
-        Some(_) => format!("{} · portable", env!("CARGO_PKG_VERSION")),
-        None => env!("CARGO_PKG_VERSION").to_string(),
+        Some(_) => format!("{VERSION} · portable"),
+        None => VERSION.to_string(),
     };
     bridge.set_version(version.into());
     bridge.set_cards(ModelRc::from(app.cards.clone()));
@@ -1485,15 +1489,14 @@ impl App {
     // ----- Mises à jour -----------------------------------------------------
 
     fn check_for_updates(&self) {
-        if !self.config.borrow().settings.check_updates
-            || self.update_state.get() != UpdateState::None
-            || self.update_checking.get()
-        {
+        let choice = update_choice(&self.config.borrow().settings);
+        if choice == UPDATES_OFF || self.update_state.get() != UpdateState::None || self.update_checking.get() {
             return;
         }
+        let beta = choice == 1;
         self.update_checking.set(true);
-        thread::spawn(|| {
-            let result = catch_unwind(update::check).unwrap_or_else(|_| Err(anyhow!("erreur interne")));
+        thread::spawn(move || {
+            let result = catch_unwind(|| update::check(beta)).unwrap_or_else(|_| Err(anyhow!("erreur interne")));
             post(move |app| app.on_update_checked(result));
         });
     }
@@ -2285,7 +2288,7 @@ impl App {
             s.filename_template.clone(),
             s.previews,
             s.convert_to_mp4,
-            s.check_updates,
+            update_choice(s),
             hotkey_index(&s.hotkeys.toggle_recording),
             hotkey_index(&s.hotkeys.show_window),
             hotkey_index(&s.hotkeys.toggle_previews),
@@ -2329,7 +2332,7 @@ impl App {
             b.set_template(values.9.into());
             b.set_settings_previews(values.10);
             b.set_settings_convert(values.11);
-            b.set_settings_check_updates(values.12);
+            b.set_settings_update_index(values.12);
             b.set_settings_open_windows(s_open_windows);
             b.set_settings_mic(mic_enabled);
             b.set_mic_choices(ModelRc::new(VecModel::from(mic_labels)));
@@ -2399,8 +2402,8 @@ impl App {
         }
         let previews_before;
         let previews_after;
-        let check_updates_before;
-        let check_updates_after;
+        let updates_before;
+        let updates_after;
         {
             let mut config = self.config.borrow_mut();
             let s = &mut config.settings;
@@ -2424,9 +2427,19 @@ impl App {
             s.previews = b.get_settings_previews();
             previews_after = s.previews;
             s.convert_to_mp4 = b.get_settings_convert();
-            check_updates_before = s.check_updates;
-            s.check_updates = b.get_settings_check_updates();
-            check_updates_after = s.check_updates;
+            updates_before = update_choice(s);
+            let update_index = b.get_settings_update_index();
+            s.check_updates = update_index != UPDATES_OFF;
+            if s.check_updates {
+                let chosen = if update_index == 1 { UpdateChannel::Beta } else { UpdateChannel::Stable };
+                // Tant que le choix reste celui de la version en cours, rien
+                // n'est figé : une bêta passera seule aux versions stables une
+                // fois la version stable installée.
+                if s.update_channel.is_some() || chosen != UpdateChannel::of_version(VERSION) {
+                    s.update_channel = Some(chosen);
+                }
+            }
+            updates_after = update_choice(s);
             s.open_windows_at_launch = b.get_settings_open_windows();
             s.microphone.enabled = b.get_settings_mic();
             if let Some((id, name)) = self.mic_choices.borrow().get(b.get_mic_index().max(0) as usize) {
@@ -2448,7 +2461,12 @@ impl App {
         }
         self.register_hotkeys();
         self.toast("Réglages enregistrés.", 1);
-        if check_updates_after && !check_updates_before {
+        if updates_after != updates_before && updates_after != UPDATES_OFF {
+            // Une version trouvée sur l'autre canal n'est plus proposée.
+            if self.update_state.get() == UpdateState::Available {
+                *self.update.borrow_mut() = None;
+                self.set_update_state(UpdateState::None);
+            }
             self.check_for_updates();
         }
     }
@@ -2826,6 +2844,17 @@ fn prepare(platform: &dyn Platform, config: &Config, scene: &Scene) -> Result<Pr
         }
     });
     Ok(Prepared { ffmpeg, encoder, missing, output_dir, output_note })
+}
+
+/// Choix « Mises à jour » affiché dans les réglages (voir `UPDATES_OFF`).
+fn update_choice(settings: &Settings) -> i32 {
+    if !settings.check_updates {
+        UPDATES_OFF
+    } else if settings.update_channel(VERSION) == UpdateChannel::Beta {
+        1
+    } else {
+        0
+    }
 }
 
 /// Même fichier, quelle que soit l'écriture du chemin (majuscules, `..`).

@@ -336,6 +336,10 @@ pub struct Settings {
     pub convert_to_mp4: bool,
     /// Recherche d'une nouvelle version au démarrage (sur GitHub).
     pub check_updates: bool,
+    /// Versions proposées. Absent tant que l'utilisateur n'a rien choisi :
+    /// c'est alors celui de la version en cours (voir `UpdateChannel`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub update_channel: Option<UpdateChannel>,
     /// Au lancement de Polyptyque, ouvrir les fenêtres manquantes de la
     /// scène active (navigateurs, applications dont la relance est activée).
     pub open_windows_at_launch: bool,
@@ -353,11 +357,44 @@ impl Default for Settings {
             previews: true,
             convert_to_mp4: false,
             check_updates: true,
+            update_channel: None,
             open_windows_at_launch: true,
             video: VideoSettings::default(),
             audio: AudioSettings::default(),
             microphone: MicrophoneSettings::default(),
             hotkeys: HotkeySettings::default(),
+        }
+    }
+}
+
+impl Settings {
+    /// Canal de mises à jour en vigueur pour la version `version` de
+    /// Polyptyque.
+    pub fn update_channel(&self, version: &str) -> UpdateChannel {
+        self.update_channel.unwrap_or_else(|| UpdateChannel::of_version(version))
+    }
+}
+
+/// Versions proposées par la recherche de mises à jour.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateChannel {
+    /// Versions stables seulement.
+    Stable,
+    /// Versions stables et bêta (préversions GitHub).
+    Beta,
+}
+
+impl UpdateChannel {
+    /// Canal par défaut : une bêta reçoit les bêtas suivantes, puis la
+    /// version stable ; une version stable ne reçoit que des versions
+    /// stables. Une bêta se reconnaît au tiret de son numéro (« 1.0.0-beta.1 »).
+    pub fn of_version(version: &str) -> Self {
+        let without_build = version.split('+').next().unwrap_or(version);
+        if without_build.contains('-') {
+            Self::Beta
+        } else {
+            Self::Stable
         }
     }
 }
@@ -698,6 +735,23 @@ mod tests {
         let config: Config = toml::from_str(text).unwrap();
         assert!(config.settings.previews);
         assert_eq!(config.settings.hotkeys.toggle_recording, "Ctrl+Maj+F9");
+        assert_eq!(config.settings.update_channel, None);
+    }
+
+    #[test]
+    fn update_channel_follows_the_version_until_chosen() {
+        assert_eq!(UpdateChannel::of_version("1.0.0-beta.1"), UpdateChannel::Beta);
+        assert_eq!(UpdateChannel::of_version("1.0.0"), UpdateChannel::Stable);
+        assert_eq!(UpdateChannel::of_version("1.0.0+abc-def"), UpdateChannel::Stable);
+        let mut settings = Settings::default();
+        assert_eq!(settings.update_channel("1.0.0-beta.2"), UpdateChannel::Beta);
+        assert_eq!(settings.update_channel("1.0.0"), UpdateChannel::Stable);
+        // Rien n'est écrit tant que l'utilisateur n'a pas choisi.
+        assert!(!toml::to_string(&settings).unwrap().contains("update_channel"));
+        settings.update_channel = Some(UpdateChannel::Stable);
+        assert_eq!(settings.update_channel("1.0.0-beta.2"), UpdateChannel::Stable);
+        let back: Settings = toml::from_str(&toml::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(back.update_channel, Some(UpdateChannel::Stable));
     }
 
     #[test]

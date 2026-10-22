@@ -100,7 +100,12 @@ Polyptyque doit tourner pendant des heures à côté d'un jeu, d'un appel vidéo
 
 **Mises à jour**
 
-Polyptyque vérifie au démarrage, puis toutes les six heures, si une nouvelle version existe et la propose d'un clic, jamais pendant un enregistrement. Cette vérification peut être désactivée dans les réglages.
+Polyptyque vérifie au démarrage, puis toutes les six heures, si une nouvelle version existe et la propose d'un clic, jamais pendant un enregistrement. Dans les réglages, « Mises à jour » permet de choisir :
+- **Versions stables** ;
+- **Versions stables et bêta** : les nouveautés plus tôt, avec plus de risques ;
+- **Ne pas rechercher**.
+
+Une copie bêta reçoit par défaut les bêtas suivantes, puis la version stable. Revenir aux versions stables ne réinstalle pas une version plus ancienne : la bêta reste jusqu'à la prochaine version stable.
 
 **Désinstaller**
 
@@ -191,13 +196,14 @@ Le mode démonstration permet de développer l'interface sans Windows. Des varia
 - Chaque envoi lance les vérifications sur Linux et Windows, et fabrique l'installateur. On le trouve dans l'onglet **Actions**, artefact `Polyptyque-windows`.
 
 **Publier une version**
-1. Mettre à jour `version` dans le `Cargo.toml` de la racine, par exemple `0.2.0`.
-2. Sur `main`, créer et envoyer l'étiquette correspondante :
+1. Mettre à jour `version` dans le `Cargo.toml` de la racine : `1.0.0` pour une version stable, `1.0.0-beta.2` pour une bêta.
+2. Écrire ses notes dans `packaging/notes/v<version>.md` (par exemple `packaging/notes/v1.0.0.md`) : elles deviennent le texte de la page de version, qui n'est pas publiée sans elles.
+3. Sur `main`, créer et envoyer l'étiquette correspondante :
    ```sh
-   git tag v0.2.0
-   git push origin v0.2.0
+   git tag v1.0.0
+   git push origin v1.0.0
    ```
-3. La fabrication publie la version sur GitHub avec son installateur. Les copies installées la proposent alors d'elles-mêmes.
+4. La fabrication publie la version sur GitHub, avec `Polyptyque-Setup.exe` et `Polyptyque-portable.zip`. Une bêta (numéro avec un tiret) est publiée comme préversion : seules les copies réglées sur « Versions stables et bêta » la proposent. Les autres versions sont proposées à toutes les copies.
 
 ## Licence
 
