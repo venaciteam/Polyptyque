@@ -191,20 +191,6 @@ Le mode démonstration permet de développer l'interface sans Windows. Des varia
 | `POLYPTYQUE_DEMO_PERDUE` | La fenêtre de Chrome est fermée |
 | `POLYPTYQUE_DEMO_MISE_A_JOUR` | Une nouvelle version est disponible |
 
-**Branches et fabrication**
-- `dev` reçoit le travail en cours ; `main` reçoit les versions validées.
-- Chaque envoi lance les vérifications sur Linux et Windows, et fabrique l'installateur. On le trouve dans l'onglet **Actions**, artefact `Polyptyque-windows`.
-
-**Publier une version**
-1. Mettre à jour `version` dans le `Cargo.toml` de la racine : `1.0.0` pour une version stable, `1.0.0-beta.2` pour une bêta.
-2. Écrire ses notes dans `packaging/notes/v<version>.md` (par exemple `packaging/notes/v1.0.0.md`) : elles deviennent le texte de la page de version, qui n'est pas publiée sans elles.
-3. Sur `main`, créer et envoyer l'étiquette correspondante :
-   ```sh
-   git tag v1.0.0
-   git push origin v1.0.0
-   ```
-4. La fabrication publie la version sur GitHub, avec `Polyptyque-Setup.exe` et `Polyptyque-portable.zip`. Une bêta (numéro avec un tiret) est publiée comme préversion : seules les copies réglées sur « Versions stables et bêta » la proposent. Les autres versions sont proposées à toutes les copies.
-
 ## Licence
 
 Polyptyque est un logiciel libre et gratuit, sous licence [GPL v3 ou ultérieure](LICENSE). Il s'appuie sur :
