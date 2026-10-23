@@ -13,6 +13,7 @@ mod pipe;
 mod process;
 pub mod session_end;
 pub mod single_instance;
+pub mod startup;
 mod system;
 mod video;
 mod windows_list;
@@ -24,6 +25,13 @@ use std::process::Command;
 use polyptyque_core::platform::{
     AudioCapture, AudioDevice, BrowserInstall, Platform, StreamPipe, VideoCapture, WindowHandle, WindowInfo,
 };
+
+/// Tant qu'une programmation est active (créneau en cours ou à venir) :
+/// mise en veille automatique et extinction de l'écran empêchées,
+/// indépendamment de l'enregistrement. À appeler depuis n'importe quel fil.
+pub fn keep_awake_for_schedules(on: bool) {
+    system::keep_awake_for_schedules(on);
+}
 
 /// Pas de fenêtre de console pour FFmpeg.
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;

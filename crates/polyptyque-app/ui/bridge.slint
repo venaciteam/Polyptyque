@@ -46,6 +46,21 @@ export struct IncidentFile {
     detail: string,
 }
 
+// Programmation, dans la liste des programmations.
+export struct ScheduleItem {
+    id: string,
+    scene: string,
+    // « 21:00 → 22:00 », « 22:00 → 02:00 (lendemain) ».
+    times: string,
+    // « Tous les jours », « Une fois, le 25/10/2026 »…
+    repeat: string,
+    // « Prochain : aujourd'hui à 21:00 », « Désactivée »…
+    next: string,
+    enabled: bool,
+    // Son enregistrement est en cours : ni modifiable ni supprimable.
+    locked: bool,
+}
+
 export struct WindowItem {
     title: string,
     program: string,
@@ -95,8 +110,43 @@ export global Bridge {
     in-out property <int> selected-source: -1;
 
     // Feuille ouverte : "", "browser", "application", "settings",
-    // "scene-new", "scene-rename", "confirm".
+    // "scene-new", "scene-rename", "confirm", "incident", "schedules",
+    // "schedule-new", "schedule-edit".
     in-out property <string> sheet;
+
+    // Programmation : pastille de la barre du haut (vide : aucune
+    // programmation à venir) ; vrai pendant un enregistrement programmé.
+    in property <string> schedule-text;
+    in property <bool> schedule-running;
+    // Liste des programmations.
+    in property <[ScheduleItem]> schedules;
+    // Lancement au démarrage de Windows (appliqué tout de suite), et ce qui
+    // l'empêche éventuellement.
+    in property <bool> startup-enabled;
+    in property <string> startup-note;
+    // Formulaire d'une programmation.
+    in property <[string]> schedule-scene-choices;
+    in-out property <int> schedule-scene-index;
+    in-out property <string> schedule-start;
+    in-out property <string> schedule-end;
+    in property <string> schedule-times-note;
+    // Répétition : 0 une seule fois, 1 tous les jours, 2 certains jours.
+    in-out property <int> schedule-repeat-index;
+    in-out property <string> schedule-date;
+    // Jours cochés, du lundi au dimanche.
+    in property <[bool]> schedule-days;
+    in property <string> schedule-error;
+
+    // Question posée par la programmation, au-dessus de tout : "" (aucune),
+    // "missed" (démarrage manqué), "auto-stop" (lancement à la main pendant
+    // un créneau), "info".
+    in property <string> prompt-kind;
+    in property <string> prompt-title;
+    in property <string> prompt-text;
+    in property <string> prompt-countdown;
+    in property <string> prompt-accept;
+    // Vide : un seul bouton.
+    in property <string> prompt-decline;
 
     // Ajout d'une source navigateur.
     in property <[string]> browser-choices;
@@ -142,6 +192,7 @@ export global Bridge {
     in-out property <int> settings-update-index;
     in-out property <bool> settings-open-windows;
     in-out property <bool> settings-close-browsers;
+    in-out property <bool> settings-startup;
     in-out property <bool> settings-mic;
     in property <[string]> mic-choices;
     in-out property <int> mic-index;
@@ -197,4 +248,18 @@ export global Bridge {
     callback close-sheet();
     callback confirm-accepted();
     callback dismiss-toast();
+
+    // Programmation.
+    callback open-schedules();
+    // Identifiant vide : nouvelle programmation.
+    callback edit-schedule(string);
+    callback toggle-schedule(string, bool);
+    callback delete-schedule(string);
+    callback save-schedule();
+    callback schedule-times-edited();
+    callback toggle-schedule-day(int);
+    callback close-schedule-editor();
+    callback set-launch-at-startup(bool);
+    callback prompt-accepted();
+    callback prompt-declined();
 }

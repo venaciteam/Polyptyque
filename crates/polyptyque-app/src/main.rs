@@ -26,6 +26,13 @@ slint::include_modules!();
 /// relancé par elle.
 pub static UPDATED_TO: OnceLock<String> = OnceLock::new();
 
+/// Argument donné par Windows quand il lance Polyptyque à l'ouverture de
+/// session (voir le réglage « Lancer Polyptyque au démarrage de Windows »).
+#[cfg(windows)]
+const STARTUP_ARG: &str = polyptyque_windows::startup::ARG;
+#[cfg(not(windows))]
+const STARTUP_ARG: &str = "--demarrage-windows";
+
 fn main() {
     // Installateur et mises à jour : doit passer en premier (il peut
     // terminer le programme, par exemple pendant une installation).
@@ -34,23 +41,33 @@ fn main() {
         .on_restarted(|version| {
             let _ = UPDATED_TO.set(version.to_string());
         })
+        // Désinstallation : Windows ne doit plus lancer un programme absent.
+        .on_before_uninstall_fast_callback(|_| {
+            if let Ok(exe) = std::env::current_exe() {
+                polyptyque_windows::startup::disable_for(&exe);
+            }
+        })
         .run();
+    let at_startup = std::env::args().skip(1).any(|arg| arg == STARTUP_ARG);
     // Une seule copie : vérifié avant d'ouvrir le journal, qui écraserait
     // celui de la copie déjà ouverte s'il porte la même minute.
     #[cfg(windows)]
     let _instance = {
         use polyptyque_windows::single_instance::{self, Instance};
-        match single_instance::acquire() {
+        match single_instance::acquire(!at_startup) {
             Instance::First(lock) => lock,
             Instance::AlreadyOpen => return,
         }
     };
     let log = init_logging();
     log::info!("Polyptyque {} (interface graphique)", env!("CARGO_PKG_VERSION"));
+    if at_startup {
+        log::info!("lancé par Windows à l'ouverture de session");
+    }
     if let Some(root) = paths::portable_root() {
         log::info!("version portable : données dans {}", root.join(paths::PORTABLE_DATA_DIR).display());
     }
-    if let Err(e) = launch() {
+    if let Err(e) = launch(at_startup) {
         log::error!("{e:#}");
         show_fatal(&format!("{e:#}\n\nJournal : {}", log.map(|p| p.display().to_string()).unwrap_or_default()));
         std::process::exit(1);
@@ -58,21 +75,29 @@ fn main() {
 }
 
 #[cfg(windows)]
-fn launch() -> Result<()> {
+fn launch(at_startup: bool) -> Result<()> {
     let platform = Arc::new(polyptyque_windows::WindowsPlatform::new());
-    let paths = controller::Paths { config: paths::config_file(), profiles: paths::profiles_dir() };
-    controller::run(platform, paths, None)
+    let paths = controller::Paths {
+        config: paths::config_file(),
+        profiles: paths::profiles_dir(),
+        schedule_state: paths::schedule_state_file(),
+    };
+    controller::run(platform, paths, None, at_startup)
 }
 
 /// Hors Windows : plateforme de démonstration, dans un dossier temporaire.
 #[cfg(not(windows))]
-fn launch() -> Result<()> {
+fn launch(at_startup: bool) -> Result<()> {
     let root = std::env::temp_dir().join("polyptyque-demo");
     let platform = demo::DemoPlatform::new(&root);
     let config = root.join("config.toml");
     let initial = (!config.exists()).then(|| platform.seed_config());
-    let paths = controller::Paths { config, profiles: root.join("profils") };
-    controller::run(Arc::new(platform), paths, initial)
+    let paths = controller::Paths {
+        config,
+        profiles: root.join("profils"),
+        schedule_state: root.join("programmations-etat.toml"),
+    };
+    controller::run(Arc::new(platform), paths, initial, at_startup)
 }
 
 fn show_fatal(message: &str) {

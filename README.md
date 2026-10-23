@@ -72,6 +72,12 @@ Polyptyque fait l'inverse : **chaque fenêtre est enregistrée à part**, dans s
 - Mise en veille automatique empêchée. Une mise en veille demandée (capot fermé, bouton) ne peut pas l'être : l'enregistrement est alors arrêté proprement, et sa reprise proposée au réveil.
 - Si Windows s'éteint ou se déconnecte pendant un enregistrement, il le signale et laisse annuler ; sinon, les fichiers sont finalisés avant la fermeture.
 
+**Enregistrements programmés**
+- Début et fin à heure fixe, une seule fois ou certains jours de la semaine : chaque programmation lance une scène, y compris la nuit (créneaux qui passent minuit) et aux changements d'heure.
+- Tant qu'une programmation est active, l'ordinateur et l'écran ne se mettent pas en veille d'eux-mêmes. Polyptyque peut se lancer au démarrage de Windows (réduit), pour que les programmations survivent à un redémarrage.
+- Démarrage manqué (Polyptyque fermé ou ordinateur en veille à l'heure prévue) : à son retour pendant le créneau, Polyptyque demande s'il faut lancer l'enregistrement, et le lance seul au bout de deux minutes sans réponse.
+- La programmation n'arrête que ce qu'elle a lancé : un enregistrement lancé à la main pendant un créneau n'est arrêté à l'heure de fin que si on l'accepte. Arrêter à la main un enregistrement programmé demande confirmation.
+
 **Résistant aux incidents**
 - Après un plantage ou une coupure de courant, Polyptyque fait le bilan des fichiers au lancement suivant, propose de réparer ceux qui ont été coupés net (sans perte de qualité) et de reprendre l'enregistrement.
 - Si l'encodeur s'arrête ou se fige, Polyptyque le relance seul, dans un nouveau fichier, sans interrompre les autres sources.
@@ -115,7 +121,7 @@ Polyptyque doit tourner pendant des heures à côté d'un jeu, d'un appel vidéo
 2. Le lancer : aucune question, aucun droit administrateur. Polyptyque s'ouvre à la fin, avec un raccourci sur le Bureau et dans le menu Démarrer.
 
 > [!TIP]
-> Pour les longues sessions, régler les « heures d'activité » de Windows Update (dans ses options avancées) sur la plage où l'on enregistre : Windows ne redémarre pas de lui-même pendant ces heures, sauf mise à jour imposée par une entreprise.
+> Pour les longues sessions, régler les « heures d'activité » de Windows Update (dans ses options avancées) sur la plage où l'on enregistre : Windows ne redémarre pas de lui-même pendant ces heures, sauf mise à jour imposée par une entreprise. Avec des enregistrements programmés, activer aussi « Lancer Polyptyque au démarrage de Windows ».
 
 > [!NOTE]
 > Polyptyque n'est pas encore signé numériquement. Windows peut afficher « Windows a protégé votre ordinateur » : cliquer sur « Informations complémentaires », puis « Exécuter quand même ».
@@ -146,7 +152,8 @@ Paramètres de Windows > Applications. Les scènes, les réglages et les connexi
 3. **Ouvrir les fenêtres** : au lancement, Polyptyque ouvre seul les fenêtres de la scène en cours (navigateurs, et applications avec « Relancer »). Le bouton « Ouvrir les fenêtres » du panneau des sources le fait à la demande, et celui de chaque carte ouvre une seule source. L'ouverture au lancement se désactive dans les réglages, comme la fermeture des navigateurs en quittant Polyptyque.
 4. **Démarrer l'enregistrement** : Polyptyque retrouve ou rouvre les fenêtres manquantes, puis affiche l'état de chaque source.
 5. **Tout arrêter** : les fichiers sont finalisés proprement. Le bouton rond de chaque aperçu démarre ou arrête une seule source.
-6. **Fichiers** : par défaut dans `Vidéos\Polyptyque` (dossier modifiable dans les réglages), un fichier MKV par source, nommés par défaut `date_heure_scène_source.mkv`. Le bouton « Fichiers » ouvre ce dossier.
+6. **Programmer** : la pastille « Programmer », en haut, ouvre les programmations. Pour chacune : la scène, l'heure de début et de fin, une seule fois ou certains jours. La pastille affiche ensuite le prochain créneau. Polyptyque doit rester ouvert ; l'option « Lancer Polyptyque au démarrage de Windows » s'y trouve aussi.
+7. **Fichiers** : par défaut dans `Vidéos\Polyptyque` (dossier modifiable dans les réglages), un fichier MKV par source, nommés par défaut `date_heure_scène_source.mkv`. Le bouton « Fichiers » ouvre ce dossier.
 
 **Raccourcis clavier**, actifs même quand Polyptyque est en arrière-plan et modifiables dans les réglages :
 
@@ -170,6 +177,7 @@ Paramètres de Windows > Applications. Les scènes, les réglages et les connexi
 - Une fenêtre réduite dans la barre des tâches n'est plus dessinée par Windows : son image se fige, et sa carte affiche « Réduite ». Le bouton « Rétablir la fenêtre » de la carte la ramène, même pendant l'enregistrement. Une fenêtre cachée derrière d'autres s'enregistre normalement.
 - Les contenus protégés (Netflix, Disney+…) apparaissent souvent en noir.
 - Certains jeux en plein écran exclusif donnent une image noire : préférer le mode « fenêtré sans bordure ».
+- Les enregistrements programmés ne démarrent que si Polyptyque est ouvert et l'ordinateur allumé : Windows ne lance pas encore Polyptyque à l'heure prévue, ni ne sort l'ordinateur de veille. La version console n'a pas de programmation.
 - Si le navigateur d'une source a plusieurs fenêtres, seule celle de la source revient au lancement suivant quand Polyptyque les ferme : Firefox et Chrome ne rouvrent que la dernière fenêtre fermée. Les autres restent dans « Fenêtres récemment fermées » de l'historique du navigateur.
 
 La liste complète, les choix techniques et la feuille de route sont dans le [cahier des charges](docs/cahier-des-charges.md).
@@ -180,8 +188,8 @@ La liste complète, les choix techniques et la feuille de route sont dans le [ca
 
 | Dossier | Rôle |
 |---|---|
-| `crates/polyptyque-core` | Scènes, sources, réglages et leurs sauvegardes, nommage, calculs de synchronisation, commandes FFmpeg, version portable, journal de la session en cours ; le contrat `Platform` que chaque système doit remplir |
-| `crates/polyptyque-windows` | Implémentation Windows : capture d'image (Windows.Graphics.Capture) et de son (WASAPI), fenêtres, navigateurs, tubes, copie unique, veille et fermeture de session |
+| `crates/polyptyque-core` | Scènes, sources, réglages et leurs sauvegardes, nommage, calculs de synchronisation, commandes FFmpeg, version portable, journal de la session en cours, programmations (créneaux et décisions) ; le contrat `Platform` que chaque système doit remplir |
+| `crates/polyptyque-windows` | Implémentation Windows : capture d'image (Windows.Graphics.Capture) et de son (WASAPI), fenêtres, navigateurs, tubes, copie unique, veille et fermeture de session, lancement au démarrage de Windows |
 | `crates/polyptyque-engine` | Sessions d'enregistrement : horloge commune, capture, encodeurs FFmpeg surveillés et relancés, dossier de secours, conversion MP4 et réparation des fichiers coupés net |
 | `crates/polyptyque-app` | Interface graphique : apparence dans `ui/` (thème dans `ui/theme.slint`), logique dans `src/` (dont le bilan après un incident), mises à jour |
 | `crates/polyptyque-cli` | Version en console, livrée pour le diagnostic |

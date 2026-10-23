@@ -33,12 +33,17 @@ use polyptyque_engine::resolve::{self, PrepareEvent};
 use polyptyque_engine::{probe, MicrophonePlan, Session, SessionPlan, SourceState, SourceStatus, SourceSummary};
 use slint::{CloseRequestResponse, ComponentHandle, Image, Model, ModelRc, SharedString, Timer, TimerMode, VecModel};
 
+use polyptyque_core::schedule::{self, Planner, Slot};
+
 use crate::convert::{ConversionEvent, Converter, JobKind};
 use crate::format;
 use crate::meter::{MicMeter, SourceMeters};
 use crate::preview::{self, PreviewManager, PreviewState};
 use crate::update;
-use crate::{AppWindow, Bridge, IncidentFile, SceneItem, SourceCard, SourceItem, WindowItem};
+use crate::{AppWindow, Bridge, IncidentFile, SceneItem, ScheduleItem, SourceCard, SourceItem, WindowItem};
+
+mod scheduling;
+use scheduling::Prompt;
 
 const LAUNCH_WAIT: Duration = Duration::from_secs(30);
 const DISK_STOP_THRESHOLD: u64 = 1_000_000_000;
@@ -86,6 +91,11 @@ enum Confirm {
     ResumeAfterSleep(String),
     /// Réparer ces fichiers mal fermés.
     RepairFiles(Vec<PathBuf>),
+    /// Arrêter l'enregistrement dont une programmation a la charge.
+    StopScheduled,
+    /// Quitter alors qu'une programmation doit encore lancer un
+    /// enregistrement.
+    QuitWithSchedules,
 }
 
 /// Fenêtre à montrer dès que l'interface est libre (aucun enregistrement,
@@ -207,6 +217,30 @@ pub struct App {
     /// proposer de le reprendre au réveil.
     #[cfg(windows)]
     sleep_stop: RefCell<Option<(String, String)>>,
+    /// Programmation : décisions (créneaux, démarrages, arrêts), et créneaux
+    /// déjà réglés gardés dans ce fichier.
+    planner: RefCell<Planner>,
+    schedule_state_path: PathBuf,
+    /// Créneau dont l'enregistrement est en train de démarrer.
+    scheduled_start: RefCell<Option<Slot>>,
+    /// Question posée par la programmation, en attente de réponse.
+    prompt: RefCell<Option<Prompt>>,
+    /// Anti-veille des programmations en place.
+    schedules_awake: Cell<bool>,
+    /// Mise en veille annoncée par Windows, depuis cet instant : la
+    /// programmation attend le réveil.
+    suspended: Cell<Option<chrono::DateTime<chrono::Utc>>>,
+    /// Quitter malgré une programmation active : déjà confirmé.
+    quit_with_schedules: Cell<bool>,
+    /// Programmations affichées, et formulaire : programmation modifiée
+    /// (aucune : nouvelle), scènes proposées, jours cochés.
+    schedule_items: Rc<VecModel<ScheduleItem>>,
+    editing_schedule: RefCell<Option<String>>,
+    schedule_scene_ids: RefCell<Vec<String>>,
+    schedule_days: Rc<VecModel<bool>>,
+    /// Lancé par Windows à l'ouverture de session : la fenêtre est réduite
+    /// dès qu'elle existe.
+    minimize_pending: Cell<bool>,
 }
 
 /// Enregistrement interrompu trouvé au lancement.
@@ -258,9 +292,13 @@ fn post(f: impl FnOnce(&Rc<App>) + Send + 'static) {
 pub struct Paths {
     pub config: PathBuf,
     pub profiles: PathBuf,
+    /// Créneaux de programmation déjà réglés.
+    pub schedule_state: PathBuf,
 }
 
-pub fn run(platform: Arc<dyn Platform>, paths: Paths, initial: Option<Config>) -> Result<()> {
+/// `at_startup` : lancé par Windows à l'ouverture de session (réduit, sans
+/// ouvrir les fenêtres de la scène).
+pub fn run(platform: Arc<dyn Platform>, paths: Paths, initial: Option<Config>, at_startup: bool) -> Result<()> {
     let ui = AppWindow::new().context("création de la fenêtre")?;
     let (mut config, warning) = match initial {
         Some(config) => (config, None),
@@ -273,6 +311,10 @@ pub fn run(platform: Arc<dyn Platform>, paths: Paths, initial: Option<Config>) -
         if let Err(e) = config.save(&paths.config) {
             log::warn!("enregistrement de la configuration : {e:#}");
         }
+    }
+    let (planner, planner_warning) = Planner::load(&paths.schedule_state);
+    if let Some(warning) = planner_warning {
+        log::warn!("{warning}");
     }
     let app = Rc::new(App {
         ui: ui.as_weak(),
@@ -320,6 +362,18 @@ pub fn run(platform: Arc<dyn Platform>, paths: Paths, initial: Option<Config>) -
         session_watch: Cell::new(false),
         #[cfg(windows)]
         sleep_stop: RefCell::new(None),
+        planner: RefCell::new(planner),
+        schedule_state_path: paths.schedule_state,
+        scheduled_start: RefCell::new(None),
+        prompt: RefCell::new(None),
+        schedules_awake: Cell::new(false),
+        suspended: Cell::new(None),
+        quit_with_schedules: Cell::new(false),
+        schedule_items: Rc::new(VecModel::default()),
+        editing_schedule: RefCell::new(None),
+        schedule_scene_ids: RefCell::new(Vec::new()),
+        schedule_days: Rc::new(VecModel::from(vec![false; 7])),
+        minimize_pending: Cell::new(at_startup),
     });
     APP.with(|a| *a.borrow_mut() = Some(app.clone()));
     *app.converter.borrow_mut() =
@@ -335,12 +389,19 @@ pub fn run(platform: Arc<dyn Platform>, paths: Paths, initial: Option<Config>) -
     bridge.set_version(version.into());
     bridge.set_cards(ModelRc::from(app.cards.clone()));
     bridge.set_incident_files(ModelRc::from(app.incident_files.clone()));
+    bridge.set_schedules(ModelRc::from(app.schedule_items.clone()));
+    bridge.set_schedule_days(ModelRc::from(app.schedule_days.clone()));
     bridge.set_can_browse(cfg!(windows));
     app.refresh_all();
     app.restart_previews();
     app.register_hotkeys();
     app.check_interrupted_session();
-    if app.config.borrow().settings.open_windows_at_launch {
+    // Emplacement inscrit au démarrage de Windows remis à jour (version
+    // portable déplacée).
+    app.apply_launch_at_startup(false);
+    // Lancé par Windows : les fenêtres de la scène s'ouvriront au début du
+    // créneau, comme pour tout enregistrement.
+    if app.config.borrow().settings.open_windows_at_launch && !at_startup {
         app.open_scene_windows(true);
     }
     if let Some(message) = warning {
@@ -374,6 +435,9 @@ pub fn run(platform: Arc<dyn Platform>, paths: Paths, initial: Option<Config>) -
     app.previews.borrow_mut().stop();
     app.meters.borrow_mut().stop();
     app.mic_meter.borrow_mut().take();
+    app.release_schedule_awake();
+    // Créneau arrêté juste avant de quitter : à ne pas relancer.
+    app.save_planner();
     // Fermeture par le système pendant un enregistrement : on finalise.
     let session = app.session.borrow_mut().take();
     if let Some(session) = session {
@@ -491,6 +555,39 @@ fn install_callbacks(ui: &AppWindow) {
     });
     b.on_dismiss_toast(|| {
         with_app(|a| a.dismiss_toast());
+    });
+    b.on_open_schedules(|| {
+        with_app(|a| a.open_schedules());
+    });
+    b.on_edit_schedule(|id| {
+        with_app(|a| a.edit_schedule(&id));
+    });
+    b.on_toggle_schedule(|id, enabled| {
+        with_app(|a| a.toggle_schedule(&id, enabled));
+    });
+    b.on_delete_schedule(|id| {
+        with_app(|a| a.delete_schedule(&id));
+    });
+    b.on_save_schedule(|| {
+        with_app(|a| a.save_schedule());
+    });
+    b.on_schedule_times_edited(|| {
+        with_app(|a| a.schedule_times_edited());
+    });
+    b.on_toggle_schedule_day(|index| {
+        with_app(|a| a.toggle_schedule_day(index));
+    });
+    b.on_close_schedule_editor(|| {
+        with_app(|a| a.close_schedule_editor());
+    });
+    b.on_set_launch_at_startup(|enabled| {
+        with_app(|a| a.set_launch_at_startup(enabled));
+    });
+    b.on_prompt_accepted(|| {
+        with_app(|a| a.prompt_accepted());
+    });
+    b.on_prompt_declined(|| {
+        with_app(|a| a.prompt_declined());
     });
 }
 
@@ -919,7 +1016,10 @@ impl App {
             return;
         }
         if self.recording() {
-            self.stop_recording(None);
+            self.request_stop();
+        } else if self.missed_prompt_open() {
+            // Raccourci pendant la question du démarrage manqué : c'est un oui.
+            self.prompt_accepted();
         } else {
             self.start_recording(None);
         }
@@ -958,6 +1058,7 @@ impl App {
             Ok(prepared) => prepared,
             Err(e) => {
                 self.toast(&format!("Impossible de démarrer : {e:#}"), 3);
+                self.recording_start_failed();
                 self.flush_pending_repairs();
                 self.show_next_deferred();
                 return;
@@ -1026,8 +1127,8 @@ impl App {
                         }
                     });
                 }
-                if let Some(note) = &prepared.output_note {
-                    self.toast(&format!("Enregistrement démarré. {note}"), 2);
+                let (message, tone) = if let Some(note) = &prepared.output_note {
+                    (format!("Enregistrement démarré. {note}"), 2)
                 } else if prepared.missing.is_empty() {
                     let message = match scene.sources.as_slice() {
                         [single] if config.active_scene().sources.len() > 1 => {
@@ -1035,19 +1136,23 @@ impl App {
                         }
                         _ => "Enregistrement démarré.".to_string(),
                     };
-                    self.toast(&message, 1);
+                    (message, 1)
                 } else {
-                    self.toast(
-                        &format!(
+                    (
+                        format!(
                             "Enregistrement démarré. Fenêtre(s) introuvable(s) : {}. Image noire en attendant leur retour.",
                             prepared.missing.join(", ")
                         ),
                         2,
-                    );
-                }
+                    )
+                };
+                // Enregistrement programmé (le message le précise), ou lancé à
+                // la main pendant un créneau (l'arrêt automatique est proposé).
+                self.recording_started(&message, tone);
             }
             Err(e) => {
                 self.toast(&format!("Impossible de démarrer : {e:#}"), 3);
+                self.recording_start_failed();
                 self.flush_pending_repairs();
                 self.show_next_deferred();
             }
@@ -1070,7 +1175,7 @@ impl App {
         if recording && count + self.joining.borrow().len() <= 1 {
             // Dernière source (et aucune en préparation) : c'est la fin de
             // l'enregistrement.
-            self.stop_recording(None);
+            self.request_stop();
         } else if recording {
             if let Some(session) = self.session.borrow_mut().as_mut() {
                 session.stop_source(id);
@@ -1164,6 +1269,10 @@ impl App {
         let Some(session) = self.session.borrow_mut().take() else {
             return;
         };
+        // Arrêt voulu ou imposé (disque plein) : un enregistrement programmé
+        // n'est pas relancé dans son créneau. Une mise en veille l'a déjà
+        // rendu à la programmation, qui le reproposera au réveil.
+        self.recording_stopping();
         // Les sources en préparation n'ont plus d'enregistrement à rejoindre.
         self.session_number.set(self.session_number.get() + 1);
         self.joining.borrow_mut().clear();
@@ -1248,9 +1357,27 @@ impl App {
         self.show_next_deferred();
     }
 
+    /// Lancé par Windows à l'ouverture de session : la fenêtre est réduite
+    /// dès qu'elle existe (Slint ne peut pas la créer réduite).
+    fn minimize_at_startup(&self) {
+        if !self.minimize_pending.get() {
+            return;
+        }
+        #[cfg(windows)]
+        if self.main_window().is_none() {
+            return;
+        }
+        self.minimize_pending.set(false);
+        if let Some(ui) = self.ui.upgrade() {
+            ui.window().set_minimized(true);
+        }
+    }
+
     fn tick_status(&self) {
         self.update_preview_size();
         self.watch_session_end();
+        self.minimize_at_startup();
+        self.tick_schedule();
         self.tick_mic_test();
         let statuses: (Vec<SourceStatus>, Vec<PathBuf>) = {
             let mut session = self.session.borrow_mut();
@@ -2023,11 +2150,21 @@ impl App {
     }
 
     fn request_delete_scene(&self) {
-        let name = self.config.borrow().active_scene().name.clone();
+        let (id, name) = {
+            let config = self.config.borrow();
+            (config.active_scene.clone(), config.active_scene().name.clone())
+        };
+        let schedules = match self.scene_schedule_count(&id) {
+            0 => String::new(),
+            1 => " Sa programmation aussi.".to_string(),
+            n => format!(" Ses {n} programmations aussi."),
+        };
         self.ask(
             Confirm::DeleteScene,
             "Supprimer la scène",
-            &format!("La scène « {name} » et ses sources seront supprimées. Les profils de navigateur restent sur le disque."),
+            &format!(
+                "La scène « {name} » et ses sources seront supprimées.{schedules} Les profils de navigateur restent sur le disque."
+            ),
             "Supprimer",
         );
     }
@@ -2427,6 +2564,7 @@ impl App {
         let mic_enabled = mic.enabled;
         let s_open_windows = s.open_windows_at_launch;
         let s_close_browsers = s.close_browsers_at_exit;
+        let s_startup = s.launch_at_startup;
         let mic_labels: Vec<SharedString> = mics.iter().map(|(_, name)| name.as_str().into()).collect();
         *self.mic_choices.borrow_mut() = mics;
         drop(config);
@@ -2454,6 +2592,7 @@ impl App {
             b.set_settings_update_index(values.12);
             b.set_settings_open_windows(s_open_windows);
             b.set_settings_close_browsers(s_close_browsers);
+            b.set_settings_startup(s_startup);
             b.set_settings_mic(mic_enabled);
             b.set_mic_choices(ModelRc::new(VecModel::from(mic_labels)));
             b.set_mic_index(mic_index as i32);
@@ -2524,6 +2663,7 @@ impl App {
         let previews_after;
         let updates_before;
         let updates_after;
+        let startup_changed;
         {
             let mut config = self.config.borrow_mut();
             let s = &mut config.settings;
@@ -2562,6 +2702,8 @@ impl App {
             updates_after = update_choice(s);
             s.open_windows_at_launch = b.get_settings_open_windows();
             s.close_browsers_at_exit = b.get_settings_close_browsers();
+            startup_changed = s.launch_at_startup != b.get_settings_startup();
+            s.launch_at_startup = b.get_settings_startup();
             s.microphone.enabled = b.get_settings_mic();
             if let Some((id, name)) = self.mic_choices.borrow().get(b.get_mic_index().max(0) as usize) {
                 if *id != s.microphone.device_id {
@@ -2581,6 +2723,9 @@ impl App {
             self.restart_previews();
         }
         self.register_hotkeys();
+        if startup_changed {
+            self.apply_launch_at_startup(true);
+        }
         self.toast("Réglages enregistrés.", 1);
         if updates_after != updates_before && updates_after != UPDATES_OFF {
             // Une version trouvée sur l'autre canal n'est plus proposée.
@@ -2608,6 +2753,7 @@ impl App {
 
     fn close_sheet(&self) {
         self.confirm.borrow_mut().take();
+        self.quit_with_schedules.set(false);
         if self.incident.borrow_mut().take().is_some() {
             // Bilan d'un enregistrement interrompu vu : il n'est plus proposé.
             SessionRecord::clear(&paths::session_record_file());
@@ -2671,6 +2817,18 @@ impl App {
                     self.start_recording(None);
                 }
             }
+            Some(Confirm::StopScheduled) => {
+                if self.recording() && !self.busy.get() {
+                    self.stop_recording(None);
+                }
+            }
+            Some(Confirm::QuitWithSchedules) => {
+                self.quit_with_schedules.set(true);
+                // La suite comme une fermeture normale (conversion en cours…).
+                if matches!(self.close_requested(), CloseRequestResponse::HideWindow) {
+                    let _ = slint::quit_event_loop();
+                }
+            }
             Some(Confirm::CancelConversion) => {
                 if let Some(converter) = self.converter.borrow().as_ref() {
                     self.conversion.borrow_mut().cancelled = true;
@@ -2706,13 +2864,26 @@ impl App {
             return CloseRequestResponse::KeepWindowShown;
         }
         if self.recording() {
-            self.ask(
-                Confirm::QuitWhileRecording,
-                "Enregistrement en cours",
-                "Arrêter l'enregistrement et quitter Polyptyque ? Les fichiers seront finalisés proprement.",
-                "Arrêter et quitter",
-            );
+            let owned = self.planner.borrow().owned().map(|slot| slot.end);
+            let schedules = schedule::any_active(&self.config.borrow().schedules, chrono::Utc::now(), &chrono::Local);
+            let mut text = match owned {
+                Some(end) => format!(
+                    "Un enregistrement programmé est en cours (jusqu'à {}). L'arrêter et quitter Polyptyque ? Les fichiers seront finalisés proprement, et il ne sera pas relancé dans ce créneau.",
+                    schedule::clock_label(end, &chrono::Local)
+                ),
+                None => "Arrêter l'enregistrement et quitter Polyptyque ? Les fichiers seront finalisés proprement.".into(),
+            };
+            if schedules {
+                text.push_str(" Les programmations ne se lancent pas tant que Polyptyque est fermé.");
+            }
+            self.ask(Confirm::QuitWhileRecording, "Enregistrement en cours", &text, "Arrêter et quitter");
             return CloseRequestResponse::KeepWindowShown;
+        }
+        if !self.quit_with_schedules.get() {
+            if let Some(text) = self.quit_schedule_warning() {
+                self.ask(Confirm::QuitWithSchedules, "Programmation active", &text, "Quitter quand même");
+                return CloseRequestResponse::KeepWindowShown;
+            }
         }
         if self.with_bridge_value(|b| b.get_converting()) {
             self.ask(
@@ -2818,18 +2989,24 @@ impl App {
     /// réveil avec toute la durée de la veille en image figée.
     #[cfg(windows)]
     fn on_suspend(&self) {
+        // Enregistrement programmé : la question du démarrage manqué sera
+        // posée au réveil, s'il a lieu pendant le créneau.
+        let scheduled = self.schedule_suspend();
         if !self.recording() {
             return;
         }
         log::warn!("mise en veille pendant l'enregistrement : arrêt propre");
-        let scene_id = self.config.borrow().active_scene.clone();
-        let (_, time) = naming::now_parts();
-        *self.sleep_stop.borrow_mut() = Some((scene_id, time));
+        if !scheduled {
+            let scene_id = self.config.borrow().active_scene.clone();
+            let (_, time) = naming::now_parts();
+            *self.sleep_stop.borrow_mut() = Some((scene_id, time));
+        }
         self.stop_recording(Some("Mise en veille de l'ordinateur : enregistrement arrêté.".into()));
     }
 
     #[cfg(windows)]
     fn on_resume(&self) {
+        self.schedule_resume();
         let Some((scene_id, time)) = self.sleep_stop.borrow_mut().take() else {
             return;
         };

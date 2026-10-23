@@ -30,14 +30,15 @@ type: projet
 	3. [[#Sources application]]
 	4. [[#Reconnaissance et restauration des fenêtres]]
 	5. [[#Enregistrement]]
-	6. [[#Microphone]]
-	7. [[#Fichiers de sortie et nommage]]
-	8. [[#Conversion MKV vers MP4]]
-	9. [[#Réglages d'encodage]]
-	10. [[#Interface]]
-	11. [[#Raccourcis clavier]]
-	12. [[#Préparation de la diffusion en direct]]
-	13. [[#Installation]]
+	6. [[#Programmation des enregistrements]]
+	7. [[#Microphone]]
+	8. [[#Fichiers de sortie et nommage]]
+	9. [[#Conversion MKV vers MP4]]
+	10. [[#Réglages d'encodage]]
+	11. [[#Interface]]
+	12. [[#Raccourcis clavier]]
+	13. [[#Préparation de la diffusion en direct]]
+	14. [[#Installation]]
 5. [[#Exigences non fonctionnelles]]
 	1. [[#Fiabilité]]
 	2. [[#Performance]]
@@ -216,6 +217,53 @@ Au lancement de Polyptyque (réglage « Ouvrir les fenêtres de la scène au lan
 - **Une seule copie** de Polyptyque à la fois : un second lancement ramène la fenêtre déjà ouverte.
 - **Arrêt, redémarrage ou déconnexion de Windows** pendant un enregistrement : Polyptyque le signale à Windows, qui l'affiche dans son écran d'arrêt et permet d'annuler. Si l'arrêt continue malgré tout, les fichiers sont finalisés avant la fermeture. Un arrêt critique (batterie épuisée) n'est jamais bloqué.
 
+### Programmation des enregistrements
+
+- **Programmation** : lance une scène (toutes ses sources) de l'heure de début à l'heure de fin, à la minute près.
+	- Répétition : **une seule fois** (une date), ou **chaque semaine certains jours** (les sept : tous les jours). Les jours désignent le jour où le créneau commence.
+	- Une heure de fin antérieure ou égale à l'heure de début désigne **le lendemain** : un créneau 22:00 → 02:00 passe minuit. Un début égal à la fin est refusé (pas de créneau de 24 h).
+	- Activer, désactiver, modifier, supprimer. Supprimer une scène supprime ses programmations (la confirmation le dit).
+	- Une programmation dont l'enregistrement est en cours ne peut être ni modifiée ni supprimée avant la fin de son créneau.
+- **Un seul enregistrement à la fois** : deux programmations activées qui se chevauchent sont refusées, avec le nom de l'autre. Des créneaux bout à bout (l'un finit à 22:00, l'autre commence à 22:00) sont acceptés : le second démarre dès que les fichiers du premier sont finalisés.
+- **Accès** : pastille de la barre du haut, qui affiche « Programmer », le prochain créneau (« Podcast · aujourd'hui à 21:00 ») ou la fin prévue de l'enregistrement programmé (« Arrêt programmé à 22:00 »). Un clic ouvre la liste des programmations (avec le prochain créneau de chacune), d'où l'on crée et modifie.
+- **Polyptyque doit être ouvert** : il n'y a pas encore de lancement par Windows à l'heure prévue.
+	- Tant qu'une programmation est **active** (un créneau en cours ou à venir), la mise en veille automatique et l'extinction de l'écran sont empêchées, par le même mécanisme que pendant l'enregistrement mais indépendamment de lui (la fin d'un enregistrement ne lève pas cette protection). Une mise en veille demandée (capot, bouton) reste possible.
+	- Quitter Polyptyque alors qu'une programmation doit encore lancer un enregistrement demande confirmation.
+- **Lancer Polyptyque au démarrage de Windows** (option, dans les programmations et dans les réglages, désactivée par défaut) : sans elle, les programmations ne survivent pas à un redémarrage (mise à jour de Windows).
+	- Inscription dans la liste « Applications au démarrage » de l'utilisateur (`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`), sans droits administrateur. Lancé ainsi, Polyptyque démarre **réduit**, sans ouvrir les fenêtres de la scène : elles s'ouvrent au début du créneau, comme pour tout enregistrement.
+	- L'emplacement inscrit est remis à jour à chaque lancement (version portable déplacée) ; l'inscription est retirée à la désinstallation.
+	- Désactivé par l'utilisateur dans les Paramètres de Windows (Applications > Démarrage) : signalé dans la fenêtre des programmations. Réactiver l'option dans Polyptyque lève cette désactivation.
+	- Version portable : seule exception à « rien n'est écrit ailleurs sur le PC », signalée sous l'option.
+
+> [!important] Principe
+> La programmation n'arrête que l'enregistrement **dont elle a la charge** : celui qu'elle a lancé (à l'heure prévue, ou après un démarrage manqué), ou celui lancé à la main dont l'utilisateur a accepté l'arrêt automatique. Jamais un autre.
+
+| Situation | Comportement |
+|---|---|
+| Début d'un créneau, rien n'enregistre | La scène du créneau devient la scène en cours et s'enregistre. Message : « Enregistrement programmé : arrêt prévu à 22:00 » |
+| **Démarrage manqué** : Polyptyque fermé ou ordinateur en veille à l'heure prévue, ouvert pendant le créneau | Fenêtre « Enregistrement programmé » : lancer maintenant, jusqu'à la fin du créneau ? Compte à rebours de **deux minutes** ; sans réponse, l'enregistrement démarre (Polyptyque relancé seul après une mise à jour de Windows, sans personne devant). La fenêtre réduite revient à l'écran. Sans objet si le créneau se termine avant |
+| Créneau commencé il y a moins de 30 s (Polyptyque ouvert juste après l'heure) | Démarrage direct, sans question |
+| Programmation créée, modifiée ou activée pendant son propre créneau | Question du démarrage manqué, plutôt qu'un démarrage d'office |
+| **Enregistrement lancé à la main** pendant un créneau (bouton, raccourci, carte d'une source) | Fenêtre : « Arrêter automatiquement cet enregistrement à 22:00 ? » Compte à rebours de deux minutes ; sans réponse, **pas d'arrêt automatique** (le lancement peut n'avoir rien à voir avec la programmation). Dans les deux cas, la programmation ne lance plus rien dans ce créneau |
+| **Enregistrement manuel déjà en cours** au début d'un créneau | Petite fenêtre d'information. L'enregistrement continue tel quel ; la programmation ne lance rien et ne l'arrête pas en fin de créneau, même s'il est arrêté entre-temps |
+| **Arrêt à la main** d'un enregistrement dont la programmation a la charge (bouton, raccourci, dernière source, quitter) | Confirmation : « Tu es dans un créneau d'enregistrement programmé… » Si oui, arrêt, sans relance dans ce créneau, même après une fermeture de Polyptyque ; les créneaux suivants restent prévus |
+| Arrêt à la main d'un enregistrement que la programmation ignore | Comme sans programmation, sans confirmation |
+| Fin du créneau | Arrêt de l'enregistrement dont la programmation a la charge : « Fin du créneau programmé. » |
+| Arrêt imposé (disque presque plein) ou démarrage impossible (scène vide, encodeur) | Message, et pas de nouvel essai dans ce créneau |
+| Plantage, coupure, arrêt ou redémarrage de Windows, mise en veille forcée pendant un enregistrement programmé | Le créneau reste à reprendre : au retour (dans le créneau), question du démarrage manqué, donc reprise automatique après deux minutes. La mise en veille ne propose pas en plus « Reprendre l'enregistrement ? » |
+
+- **Changements d'heure** : les heures sont celles de l'horloge affichée par Windows. La nuit du passage à l'heure d'hiver, un créneau 01:00 → 04:00 dure réellement 4 h ; celle du passage à l'heure d'été, 2 h. Comme dans les agendas (RFC 5545), une heure qui n'existe pas (02:30 au passage à l'heure d'été) est décalée de la durée du saut (03:30), et une heure qui existe deux fois (02:30 au passage à l'heure d'hiver) est prise à sa première occurrence. Un créneau qui deviendrait vide (02:15 → 03:00 la nuit du passage à l'heure d'été) n'a pas lieu cette nuit-là. L'enregistrement lui-même reste sur son horloge interne (B9 de l'[[analyse-des-risques|analyse des risques]]).
+- **Mémoire des créneaux** : les créneaux « réglés » (refusés, arrêtés à la main, impossibles, occupés par un enregistrement manuel) sont gardés dans `programmations-etat.toml` (dossier des données locales, ou `données` en version portable), effacés une fois leur créneau passé. Un créneau interrompu malgré l'utilisateur n'y figure pas : c'est ce qui permet de le reproposer.
+- Tout est noté dans le journal (démarrages, questions et réponses, arrêts, anti-veille).
+
+> [!todo] À tester sur la machine de référence
+> Démarrage d'un enregistrement programmé avec la session verrouillée et l'écran éteint (capture d'une fenêtre dans ces conditions, connexion automatique de Windows après une mise à jour). Fiche : [[protocole-test-programmation]].
+
+> [!info] Plus tard
+> - Lancement par Windows à l'heure prévue, même logiciel fermé (Planificateur de tâches).
+> - Sortie de veille automatique à l'heure prévue (minuteries de réveil).
+> - Programmations exposées au pilotage par un modèle de langage : la logique est déjà séparée de l'interface (`polyptyque-core`, module `schedule`).
+
 ### Microphone
 
 - **Désactivé par défaut.**
@@ -323,7 +371,7 @@ Inspirée d'[[OBS Studio]], volontairement allégée, thème sombre.
 > ![Ajout d'une source application](captures/interface-ajout-application.png)
 - Par source : nom, état, cadence réelle, indicateur de niveau sonore, durée, taille du fichier, bouton d'enregistrement individuel.
 - Niveau sonore affiché **en permanence**, pas seulement pendant l'enregistrement : chaque source écoute le son de son programme (même capture que l'enregistrement, seule la crête est gardée). Dès que le moteur écoute la source (enregistrement, préparation, finalisation), cette écoute s'arrête et la carte affiche le niveau du moteur. Indépendant du réglage des aperçus.
-- Barre du haut : pastille du micro (avec son niveau pendant l'enregistrement) et pastille de la conversion MP4 en cours.
+- Barre du haut : pastille de la programmation (voir [[#Programmation des enregistrements]]), pastille du micro (avec son niveau pendant l'enregistrement) et pastille de la conversion MP4 en cours.
 - **Barre d'état** : espace disque libre, autonomie estimée, charge processeur et carte graphique, images perdues.
 - **Fenêtre de paramètres** : Sortie, Encodage, Audio, Raccourcis, Général.
 - Langue : français au départ, textes externalisés pour permettre la traduction (public visé : grand public).
@@ -379,6 +427,7 @@ Solution retenue : **[[Velopack]]** (outil d'installation et de mise à jour éc
 | Dossier d'installation | `%LOCALAPPDATA%\PolyptyqueApp`, distinct des données (`%APPDATA%\Polyptyque`, `%LOCALAPPDATA%\Polyptyque`) : une désinstallation efface tout le dossier d'installation mais conserve scènes, réglages, profils de navigateur (connexions) et journaux |
 | Système minimal | Windows 10 version 2004 ; refus avec explication en dessous |
 | Version portable | `Polyptyque-portable.zip`, sans installation et autonome : scènes, réglages et leurs sauvegardes, profils de navigateur (connexions) et journaux dans le dossier `données` du dossier décompressé, rien d'écrit ailleurs sur le PC, pour tout emporter d'un ordinateur à l'autre. Les profils et les navigateurs sont retrouvés automatiquement après un déplacement. Les enregistrements restent dans le dossier choisi (repli sur `Vidéos\Polyptyque` s'il n'existe pas sur le nouvel ordinateur). Reconnue au marqueur `.portable` que Velopack place dans le zip ; les réglages affichent « portable » à côté du numéro de version |
+| Démarrage de Windows | Option « Lancer Polyptyque au démarrage de Windows », désactivée par défaut (voir [[#Programmation des enregistrements]]) ; inscription retirée à la désinstallation |
 | Mises à jour | Recherche au démarrage puis toutes les 6 h (désactivable) ; proposées d'un clic, téléchargées avec avancement, puis redémarrage ; jamais pendant un enregistrement ou une conversion (sinon installées au prochain démarrage). Source : publications GitHub du dépôt public |
 | Publication | Étiquette `vX.Y.Z` (identique à la version de `Cargo.toml`) : la fabrication publie la version GitHub, avec mise à jour partielle depuis la précédente, notes de version obligatoires (`packaging/notes/vX.Y.Z.md`). Une bêta (`X.Y.Z-beta.N`) est publiée comme préversion GitHub |
 | Liens de téléchargement | En tête du README, liens directs vers l'installateur et la version portable. Épinglés sur l'étiquette de la bêta en cours tant qu'aucune version stable n'existe (`releases/latest/download/` ignore les préversions et renvoie 404), donc à mettre à jour à chaque bêta. **À la sortie de la 1.0.0 stable : passer aux adresses `releases/latest/download/`**, qui suivent ensuite seules chaque version stable |
@@ -470,6 +519,8 @@ Solution retenue : **[[Velopack]]** (outil d'installation et de mise à jour éc
 | Plantage de l'encodeur : environ une seconde perdue | Données encore en mémoire dans FFmpeg | La suite est dans `…_partie2.mkv`, à placer au montage à la suite de la première partie |
 | Arrêt forcé de Windows sans délai | Windows peut fermer Polyptyque sans attendre | Fichiers MKV lisibles quand même ; au plus une seconde perdue |
 | Pas de protection contre l'arrêt de Windows dans la console | Seule l'interface graphique a une fenêtre pour la recevoir | Utiliser l'interface graphique |
+| Programmation : Polyptyque doit être ouvert, l'ordinateur éveillé | Pas encore de lancement par Windows à l'heure prévue, ni de sortie de veille | Option « Lancer Polyptyque au démarrage de Windows », anti-veille, question au retour (démarrage manqué) |
+| Pas de programmation dans la console | Fonction de l'interface graphique | Utiliser l'interface graphique |
 
 > [!bug] Point à surveiller
 > Des utilisateurs d'OBS signalent que la capture audio d'un navigateur échoue selon qu'il a été ouvert avant ou après le logiciel de capture. Comme Polyptyque lance lui-même les navigateurs, le risque est réduit, mais il sera testé explicitement.
@@ -501,7 +552,7 @@ Le code est organisé en modules indépendants (« crates » Rust) :
 
 | Module | Rôle | Dépend du système |
 |---|---|---|
-| `polyptyque-core` | Scènes, sources, réglages, sauvegarde, nommage, calculs de synchronisation, commandes FFmpeg, et le contrat `Platform` que chaque système doit remplir | Non |
+| `polyptyque-core` | Scènes, sources, réglages, sauvegarde, nommage, calculs de synchronisation, commandes FFmpeg, programmations (créneaux et décisions), et le contrat `Platform` que chaque système doit remplir | Non |
 | `polyptyque-windows` | Implémentation Windows de `Platform` : capture d'image et de son, fenêtres, processus, navigateurs installés, tubes | **Oui** |
 | `polyptyque-engine` | Sessions d'enregistrement : fils de capture, horloge commune, encodeurs, arrêt propre | Non |
 | `polyptyque-app` | Interface graphique [[Slint]] : apparence dans `ui/` (thème dans `ui/theme.slint`), logique dans `src/` ; mode démonstration hors Windows | Non (raccourcis et arrêt de Windows : oui) |
@@ -520,6 +571,7 @@ La session simulée (`polyptyque-engine/tests`) rejoue des enregistrements compl
 | Encodage et MKV | [[FFmpeg]] 8.1 (version GPL) : un processus par source, alimenté par deux tubes nommés (image NV12, son flottant), surveillé et relancé si besoin | NVENC, AMF, Quick Sync, x264 ; une panne d'encodeur n'affecte qu'une source |
 | Conversion MP4 | [[FFmpeg]] en recopie sans réencodage (`-c copy`) | Vérification des pistes et de la durée |
 | Fermeture de session | `ShutdownBlockReasonCreate`, messages `WM_QUERYENDSESSION` et `WM_ENDSESSION` sur la fenêtre principale | |
+| Programmation | Heure locale du système par `chrono` (changements d'heure compris) ; anti-veille `SetThreadExecutionState` sur un fil dédié ; lancement au démarrage par la clé `Run` de l'utilisateur | Vérifiée par des tests avec le vrai fuseau Europe/Paris (`chrono-tz`) |
 | Conversion d'image | Processeur vidéo Direct3D 11 de la carte graphique | Mise à l'échelle et conversion NV12 BT.709 sans passer par le processeur |
 | Interface | [[Slint]] | Apparence décrite dans des fichiers `.slint` séparés de la logique ; compatible GPL v3 ; accessibilité via AccessKit ; aperçus par tampons d'image |
 | Installateur | [[Velopack]] | Un seul `Polyptyque-Setup.exe`, sans question, mises à jour automatiques |
@@ -579,6 +631,14 @@ Seule une implémentation de `Platform` est à écrire pour chaque système (`po
 > - [x] Lot 2 et 3 avancés : mise en veille (arrêt propre, reprise proposée), relance par Windows après un redémarrage, bascule sur le processeur, journaux de plus de 30 jours effacés
 > - [ ] Validation sur la machine de référence
 
+> [!todo] Étape 3 ter - Programmation des enregistrements, écrite le 2026-10-23
+> - [x] Programmations : une fois ou certains jours, créneaux qui passent minuit, changements d'heure, chevauchements refusés
+> - [x] Démarrage et arrêt à l'heure prévue ; démarrage manqué avec compte à rebours ; lancement à la main pendant un créneau ; enregistrement manuel déjà en cours ; arrêt à la main confirmé
+> - [x] Anti-veille tant qu'une programmation est active ; confirmation avant de quitter
+> - [x] Lancement au démarrage de Windows (réduit, sans ouvrir les fenêtres), retiré à la désinstallation
+> - [x] Vérifié en mode démonstration (démarrage manqué, démarrage à l'heure, créneaux bout à bout, arrêt automatique)
+> - [ ] Validation sur la machine de référence, dont session verrouillée et écran éteint ([[protocole-test-programmation]])
+
 > [!todo] Étape 4 - Publication
 > - [ ] Dépôt public, première version publiée
 > - [ ] FFmpeg compilé par le projet (plus léger, signable)
@@ -586,6 +646,7 @@ Seule une implémentation de `Platform` est à écrire pour chaque système (`po
 > - [ ] Tests d'endurance de 12 h complets (un premier test de 14 h 15 réussi le 2026-10-21 en 1280×720, 30 i/s ; à refaire avec les réglages par défaut, 1920×1080 et 60 i/s)
 
 > [!info] Plus tard
+> - Programmation : lancement par Windows à l'heure prévue même logiciel fermé, sortie de veille automatique, pilotage par un modèle de langage
 > - Diffusion en direct (gratuite)
 > - Portage macOS, puis Linux
 > - Réglages d'encodage par source
@@ -646,6 +707,11 @@ Seule une implémentation de `Platform` est à écrire pour chaque système (`po
 | 2026-10-22 | Niveau sonore des sources affiché en permanence (comme OBS), par une écoute légère suspendue dès que le moteur écoute la source ; micro exclu (icône « micro utilisé » de Windows sinon allumée en permanence) |
 | 2026-10-22 | Test du micro dans les réglages : niveau du micro choisi, écouté seulement réglages ouverts |
 | 2026-10-22 | Publication de la 1.0.0-beta.2 (préversion) : niveau sonore permanent, fermeture des navigateurs des sources, test du micro |
+| 2026-10-23 | Programmation des enregistrements : créneaux à heure fixe, une fois ou certains jours, chacun lance une scène ; Polyptyque doit être ouvert ; la programmation n'arrête que l'enregistrement dont elle a la charge |
+| 2026-10-23 | Démarrage manqué : question avec compte à rebours de deux minutes, oui par défaut ; lancement à la main pendant un créneau : arrêt automatique proposé, non par défaut ; arrêt à la main confirmé seulement pour un enregistrement dont la programmation a la charge |
+| 2026-10-23 | Pendant l'attente d'un créneau : veille et extinction de l'écran empêchées, comme pendant l'enregistrement (plutôt que la veille seule) |
+| 2026-10-23 | Lancement au démarrage de Windows : option, Polyptyque réduit et sans ouvrir les fenêtres de la scène ; quitter avec une programmation active demande confirmation |
+| 2026-10-23 | Chevauchements de programmations refusés (créneaux bout à bout acceptés) ; heure inexistante décalée de la durée du saut, heure double prise à sa première occurrence (RFC 5545) ; démarrage direct jusqu'à 30 s de retard |
 
 ---
 
@@ -684,3 +750,6 @@ Seule une implémentation de `Platform` est à écrire pour chaque système (`po
 - [Microsoft - WM_ENDSESSION](https://learn.microsoft.com/en-us/windows/win32/shutdown/wm-endsession)
 - [Microsoft - Changements de l'arrêt depuis Windows Vista](https://learn.microsoft.com/en-us/windows/win32/shutdown/shutdown-changes-for-windows-vista)
 - [oCam - Erreur 0x80070005 à l'initialisation du micro (confidentialité Windows)](https://ohsoft.net/eng/ocam_help.php?id=126)
+- [Microsoft - SetThreadExecutionState](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-setthreadexecutionstate)
+- [Microsoft - Connexion automatique après un redémarrage de Windows Update (ARSO)](https://learn.microsoft.com/en-us/windows-server/security/windows-authentication/winlogon-automatic-restart-sign-on-arso)
+- [IETF - RFC 5545, heures inexistantes ou doubles (section 3.3.5)](https://datatracker.ietf.org/doc/html/rfc5545#section-3.3.5)
