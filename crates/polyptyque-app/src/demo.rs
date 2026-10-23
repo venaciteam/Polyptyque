@@ -99,9 +99,10 @@ impl DemoPlatform {
             class: WINDOWS[2].class.into(),
             exe: WINDOWS[2].exe.into(),
         };
-        let scene = config.active_scene_mut();
-        scene.name = "Podcast".into();
-        scene.sources = vec![concert, conference, Source::application("Discord", &discord, false, true)];
+        config.active_scene_mut().name = "Podcast".into();
+        for source in [concert, conference, Source::application("Discord", &discord, false, true)] {
+            config.add_source(source);
+        }
         config.scenes.push(Scene::new("Archive"));
         config
     }

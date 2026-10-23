@@ -47,6 +47,15 @@ pub fn capitalize(text: &str) -> String {
     }
 }
 
+/// Liste en français : « A », « A et B », « A, B et C ».
+pub fn join_list(items: &[String]) -> String {
+    match items {
+        [] => String::new(),
+        [single] => single.clone(),
+        [rest @ .., last] => format!("{} et {last}", rest.join(", ")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -61,5 +70,9 @@ mod tests {
         assert_eq!(level(0.0), 0.0);
         assert!((level(0.001) - 0.0).abs() < 1e-6);
         assert_eq!(capitalize("discord"), "Discord");
+        let names = ["« A »".to_string(), "« B »".into(), "« C »".into()];
+        assert_eq!(join_list(&names[..1]), "« A »");
+        assert_eq!(join_list(&names[..2]), "« A » et « B »");
+        assert_eq!(join_list(&names), "« A », « B » et « C »");
     }
 }

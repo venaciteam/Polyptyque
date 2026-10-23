@@ -93,6 +93,8 @@ Polyptyque fait l'inverse : **chaque fenêtre est enregistrée à part**, dans s
 
 **Simple à utiliser**
 - Scènes (groupes de sources), aperçus en direct de chaque source, raccourcis clavier globaux.
+- Une même source dans plusieurs scènes : copier, coller (clic droit, ou <kbd>Ctrl</kbd> + <kbd>C</kbd> / <kbd>Ctrl</kbd> + <kbd>V</kbd>), ou dupliquer toute une scène. C'est la même fenêtre et, pour un navigateur, les mêmes connexions : rien à reconfigurer.
+- Sources réordonnées par glisser-déposer, dans la liste ou directement dans la grille des aperçus (ou avec les flèches).
 - Niveau sonore de chaque source affiché en permanence, même sans enregistrer : une source muette se repère avant de lancer l'enregistrement.
 - Un bouton pour tout enregistrer, ou un bouton par source pour enregistrer une source seule.
 - Encodage par la carte graphique (NVIDIA, AMD, Intel) quand elle est disponible, ou par le processeur. Si la carte refuse un encodage de plus (limite des cartes GeForce, autres logiciels compris), la source passe seule sur le processeur.
@@ -149,11 +151,12 @@ Paramètres de Windows > Applications. Les scènes, les réglages et les connexi
 
 1. **Ajouter une source navigateur** : choisir le navigateur, un nom, éventuellement une adresse. Polyptyque l'ouvre avec un profil qui lui est propre : s'y connecter, préparer ses onglets. Tout est conservé pour les fois suivantes.
 2. **Ajouter une source application** : choisir une fenêtre ouverte (Discord, un jeu, Tor Browser…).
-3. **Ouvrir les fenêtres** : au lancement, Polyptyque ouvre seul les fenêtres de la scène en cours (navigateurs, et applications avec « Relancer »). Le bouton « Ouvrir les fenêtres » du panneau des sources le fait à la demande, et celui de chaque carte ouvre une seule source. L'ouverture au lancement se désactive dans les réglages, comme la fermeture des navigateurs en quittant Polyptyque.
-4. **Démarrer l'enregistrement** : Polyptyque retrouve ou rouvre les fenêtres manquantes, puis affiche l'état de chaque source.
-5. **Tout arrêter** : les fichiers sont finalisés proprement. Le bouton rond de chaque aperçu démarre ou arrête une seule source.
-6. **Programmer** : la pastille « Programmer », en haut, ouvre les programmations. Pour chacune : la scène, l'heure de début et de fin, une seule fois ou certains jours. La pastille affiche ensuite le prochain créneau. Polyptyque doit rester ouvert ; l'option « Lancer Polyptyque au démarrage de Windows » s'y trouve aussi.
-7. **Fichiers** : par défaut dans `Vidéos\Polyptyque` (dossier modifiable dans les réglages), un fichier MKV par source, nommés par défaut `date_heure_scène_source.mkv`. Le bouton « Fichiers » ouvre ce dossier.
+3. **Réutiliser une source dans une autre scène** : clic droit sur la source > « Copier » (ou <kbd>Ctrl</kbd> + <kbd>C</kbd>), choisir l'autre scène, puis « Coller » (ou <kbd>Ctrl</kbd> + <kbd>V</kbd>). C'est la même source dans les deux scènes, avec les mêmes connexions ; la supprimer d'une scène ne la retire pas de l'autre. Le bouton « Dupliquer la scène » fait de même pour toutes les sources d'une scène.
+4. **Ouvrir les fenêtres** : au lancement, Polyptyque ouvre seul les fenêtres de la scène en cours (navigateurs, et applications avec « Relancer »). Le bouton « Ouvrir les fenêtres » du panneau des sources le fait à la demande, et celui de chaque carte ouvre une seule source. L'ouverture au lancement se désactive dans les réglages, comme la fermeture des navigateurs en quittant Polyptyque.
+5. **Démarrer l'enregistrement** : Polyptyque retrouve ou rouvre les fenêtres manquantes, puis affiche l'état de chaque source.
+6. **Tout arrêter** : les fichiers sont finalisés proprement. Le bouton rond de chaque aperçu démarre ou arrête une seule source.
+7. **Programmer** : la pastille « Programmer », en haut, ouvre les programmations. Pour chacune : la scène, l'heure de début et de fin, une seule fois ou certains jours. La pastille affiche ensuite le prochain créneau. Polyptyque doit rester ouvert ; l'option « Lancer Polyptyque au démarrage de Windows » s'y trouve aussi.
+8. **Fichiers** : par défaut dans `Vidéos\Polyptyque` (dossier modifiable dans les réglages), un fichier MKV par source, nommés par défaut `date_heure_scène_source.mkv`. Le bouton « Fichiers » ouvre ce dossier.
 
 **Raccourcis clavier**, actifs même quand Polyptyque est en arrière-plan et modifiables dans les réglages :
 
@@ -162,6 +165,8 @@ Paramètres de Windows > Applications. Les scènes, les réglages et les connexi
 | <kbd>Ctrl</kbd> + <kbd>Maj</kbd> + <kbd>F9</kbd> | Démarrer ou arrêter l'enregistrement |
 | <kbd>Ctrl</kbd> + <kbd>Maj</kbd> + <kbd>F10</kbd> | Afficher ou réduire Polyptyque |
 | <kbd>Ctrl</kbd> + <kbd>Maj</kbd> + <kbd>F11</kbd> | Activer ou couper les aperçus |
+
+Dans la fenêtre de Polyptyque, <kbd>Ctrl</kbd> + <kbd>C</kbd> copie la source sélectionnée et <kbd>Ctrl</kbd> + <kbd>V</kbd> la colle dans la scène en cours.
 
 ## Pour le montage
 

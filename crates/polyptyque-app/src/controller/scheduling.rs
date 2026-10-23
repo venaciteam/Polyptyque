@@ -101,7 +101,7 @@ impl App {
     /// Lance la scène d'un créneau qui commence (ou dont le démarrage
     /// manqué est accepté).
     fn start_scheduled(&self, slot: Slot) {
-        let scene = self.config.borrow().scene(&slot.scene_id).map(|s| (s.name.clone(), s.sources.len()));
+        let scene = self.config.borrow().scene(&slot.scene_id).map(|s| (s.name.clone(), s.source_ids.len()));
         let problem = match scene {
             None => Some("sa scène n'existe plus".to_string()),
             Some((name, 0)) => Some(format!("la scène « {name} » n'a aucune source")),

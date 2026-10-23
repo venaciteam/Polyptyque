@@ -1,4 +1,4 @@
-POLYPTYQUE 1.0 BÊTA 3
+POLYPTYQUE 1.0 BÊTA 4
 =====================
 
 Polyptyque enregistre plusieurs fenêtres en même temps, chacune dans son

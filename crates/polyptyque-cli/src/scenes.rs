@@ -15,7 +15,7 @@ pub fn menu(config: &mut Config) -> Result<()> {
             .iter()
             .map(|scene| {
                 let marker = if scene.id == config.active_scene { "●" } else { " " };
-                format!("{marker} {} ({} source(s))", scene.name, scene.sources.len())
+                format!("{marker} {} ({} source(s))", scene.name, scene.source_ids.len())
             })
             .collect();
         let scenes = items.len();

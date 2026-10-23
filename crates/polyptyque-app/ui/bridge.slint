@@ -108,9 +108,12 @@ export global Bridge {
     // des aperçus).
     in-out property <length> card-width;
     in-out property <int> selected-source: -1;
+    // Une source a été copiée (Ctrl+C) et existe encore : elle peut être
+    // collée dans la scène en cours.
+    in property <bool> can-paste;
 
     // Feuille ouverte : "", "browser", "application", "settings",
-    // "scene-new", "scene-rename", "confirm", "incident", "schedules",
+    // "scene-new", "scene-rename", "scene-duplicate", "confirm", "incident", "schedules",
     // "schedule-new", "schedule-edit".
     in-out property <string> sheet;
 
@@ -212,6 +215,7 @@ export global Bridge {
     callback select-scene(string);
     callback request-new-scene();
     callback request-rename-scene();
+    callback request-duplicate-scene();
     callback request-delete-scene();
     callback confirm-scene-name();
     callback request-add-browser();
@@ -222,6 +226,13 @@ export global Bridge {
     callback confirm-add-application();
     callback request-remove-source();
     callback move-source(int);
+    // Glisser-déposer : la source passe de la première position à la
+    // seconde (les autres se décalent).
+    callback move-source-to(int, int);
+    // Copie la source sélectionnée ; colle la source copiée dans la scène en
+    // cours (la même source, partagée entre les scènes).
+    callback copy-source();
+    callback paste-source();
     callback open-source(string);
     callback restore-window(string);
     callback open-scene-windows();

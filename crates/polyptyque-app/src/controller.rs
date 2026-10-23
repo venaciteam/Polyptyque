@@ -19,7 +19,8 @@ use std::time::{Duration, Instant};
 use anyhow::{anyhow, Context, Result};
 use polyptyque_core::browsers::{classify_executable, is_tor_browser, program_name};
 use polyptyque_core::config::{
-    BrowserFamily, BrowserRef, Codec, Config, HardwarePreference, Scene, Settings, Source, SourceKind, UpdateChannel,
+    BrowserFamily, BrowserRef, Codec, Config, HardwarePreference, PasteError, Scene, Settings, Source, SourceKind,
+    UpdateChannel,
 };
 use polyptyque_core::encoder::{bytes_per_hour, EncoderChoice};
 use polyptyque_core::hotkeys;
@@ -200,6 +201,8 @@ pub struct App {
     deferred: RefCell<Vec<Deferred>>,
     /// Ouverture des fenêtres de la scène en cours.
     opening_windows: Cell<bool>,
+    /// Source copiée (Ctrl+C), à coller dans une autre scène.
+    copied_source: RefCell<Option<String>>,
     /// Micros proposés dans les réglages : identifiant et nom.
     mic_choices: RefCell<Vec<(String, String)>>,
     /// Un problème de micro a déjà été signalé pendant cet enregistrement.
@@ -351,6 +354,7 @@ pub fn run(platform: Arc<dyn Platform>, paths: Paths, initial: Option<Config>, a
         pending_repairs: RefCell::new(Vec::new()),
         deferred: RefCell::new(Vec::new()),
         opening_windows: Cell::new(false),
+        copied_source: RefCell::new(None),
         mic_choices: RefCell::new(Vec::new()),
         mic_warned: Cell::new(false),
         update: RefCell::new(None),
@@ -472,6 +476,9 @@ fn install_callbacks(ui: &AppWindow) {
     b.on_request_rename_scene(|| {
         with_app(|a| a.open_scene_sheet(false));
     });
+    b.on_request_duplicate_scene(|| {
+        with_app(|a| a.open_scene_sheet_duplicate());
+    });
     b.on_request_delete_scene(|| {
         with_app(|a| a.request_delete_scene());
     });
@@ -501,6 +508,15 @@ fn install_callbacks(ui: &AppWindow) {
     });
     b.on_move_source(|delta| {
         with_app(|a| a.move_source(delta));
+    });
+    b.on_move_source_to(|from, to| {
+        with_app(|a| a.move_source_to(from, to));
+    });
+    b.on_copy_source(|| {
+        with_app(|a| a.copy_source());
+    });
+    b.on_paste_source(|| {
+        with_app(|a| a.paste_source());
     });
     b.on_open_source(|id| {
         with_app(|a| a.open_source(&id));
@@ -626,29 +642,36 @@ impl App {
     fn refresh_all(&self) {
         let config = self.config.borrow();
         let scene = config.active_scene();
+        let scene_sources = config.active_sources();
         let scenes: Vec<SceneItem> = config
             .scenes
             .iter()
             .map(|s| SceneItem {
                 id: s.id.as_str().into(),
                 name: s.name.as_str().into(),
-                count: s.sources.len() as i32,
+                count: s.source_ids.len() as i32,
                 active: s.id == config.active_scene,
             })
             .collect();
-        let sources: Vec<SourceItem> = scene
-            .sources
+        // Une source partagée le dit : la modifier (se connecter dans son
+        // navigateur…) la modifie dans toutes ses scènes.
+        let sources: Vec<SourceItem> = scene_sources
             .iter()
-            .map(|s| SourceItem {
-                id: s.id.as_str().into(),
-                name: s.name.as_str().into(),
-                kind: s.kind_label().into(),
-                browser: s.is_browser(),
+            .map(|s| {
+                let kind = match config.scenes_with(&s.id).len() {
+                    0 | 1 => s.kind_label(),
+                    n => format!("{} · {n} scènes", s.kind_label()),
+                };
+                SourceItem {
+                    id: s.id.as_str().into(),
+                    name: s.name.as_str().into(),
+                    kind: kind.into(),
+                    browser: s.is_browser(),
+                }
             })
             .collect();
         let previews = config.settings.previews;
-        let cards: Vec<SourceCard> = scene
-            .sources
+        let cards: Vec<SourceCard> = scene_sources
             .iter()
             .map(|s| SourceCard {
                 id: s.id.as_str().into(),
@@ -671,9 +694,10 @@ impl App {
             })
             .collect();
         let scene_name = scene.name.clone();
-        let source_count = scene.sources.len();
+        let source_count = scene_sources.len();
         let microphone = config.settings.microphone.enabled;
         drop(config);
+        let can_paste = self.can_paste();
 
         // Les aperçus et le moteur ne signalent que les changements : on garde
         // l'image et l'état déjà connus de chaque source.
@@ -715,6 +739,7 @@ impl App {
             b.set_scenes(ModelRc::new(VecModel::from(scenes)));
             b.set_scene_name(scene_name.into());
             b.set_sources(ModelRc::new(VecModel::from(sources)));
+            b.set_can_paste(can_paste);
             b.set_previews_enabled(previews);
             b.set_mic_enabled(microphone);
             if b.get_selected_source() >= source_count as i32 {
@@ -763,7 +788,7 @@ impl App {
             Some(state) => state,
             None => {
                 let config = self.config.borrow();
-                let sources = config.active_scene().sources.len().max(1) as u64;
+                let sources = config.active_scene().source_ids.len().max(1) as u64;
                 let video = config.settings.video.bitrate_kbps;
                 (
                     config.settings.output_dir.clone(),
@@ -835,8 +860,7 @@ impl App {
             let mut previews = self.previews.borrow_mut();
             previews.stop();
             if config.settings.previews {
-                *previews =
-                    PreviewManager::start(&self.platform, &config.active_scene().sources, self.preview_size.get());
+                *previews = PreviewManager::start(&self.platform, &config.active_sources(), self.preview_size.get());
             }
         }
         // Les vumètres suivent les mêmes sources, même aperçus coupés.
@@ -849,7 +873,7 @@ impl App {
         let config = self.config.borrow();
         let mut meters = self.meters.borrow_mut();
         meters.stop();
-        *meters = SourceMeters::start(&self.platform, &config.active_scene().sources, |id| self.engine_listens(id));
+        *meters = SourceMeters::start(&self.platform, &config.active_sources(), |id| self.engine_listens(id));
     }
 
     /// Le moteur écoute déjà le son de cette source (enregistrement,
@@ -1029,11 +1053,12 @@ impl App {
     fn start_recording(&self, only: Option<&str>) {
         self.keep_incident_repairs();
         let config = self.config.borrow().clone();
-        let mut scene = config.active_scene().clone();
+        let scene = config.active_scene().clone();
+        let mut sources = config.active_sources();
         if let Some(id) = only {
-            scene.sources.retain(|s| s.id == id);
+            sources.retain(|s| s.id == id);
         }
-        if scene.sources.is_empty() {
+        if sources.is_empty() {
             self.toast("Ajoute d'abord au moins une source à cette scène.", 2);
             self.flush_pending_repairs();
             return;
@@ -1042,13 +1067,13 @@ impl App {
         self.set_busy("Recherche du meilleur encodeur…");
         let platform = self.platform.clone();
         thread::spawn(move || {
-            let result = catch_unwind(AssertUnwindSafe(|| prepare(platform.as_ref(), &config, &scene)))
+            let result = catch_unwind(AssertUnwindSafe(|| prepare(platform.as_ref(), &config, &sources)))
                 .unwrap_or_else(|_| Err(anyhow!("erreur interne pendant la préparation (voir le journal)")));
-            post(move |app| app.finish_start(result, config, scene));
+            post(move |app| app.finish_start(result, config, scene, sources));
         });
     }
 
-    fn finish_start(&self, result: Result<Prepared>, config: Config, scene: Scene) {
+    fn finish_start(&self, result: Result<Prepared>, config: Config, scene: Scene, sources: Vec<Source>) {
         self.set_busy("");
         if self.quitting.get() {
             let _ = slint::quit_event_loop();
@@ -1069,7 +1094,7 @@ impl App {
         settings.output_dir = prepared.output_dir.clone();
         let plan = SessionPlan {
             scene_name: scene.name.clone(),
-            sources: scene.sources.clone(),
+            sources: sources.clone(),
             settings,
             encoder: prepared.encoder,
             ffmpeg: prepared.ffmpeg,
@@ -1082,7 +1107,7 @@ impl App {
                 .then(|| MicrophonePlan { device_id: config.settings.microphone.device().map(str::to_string) }),
         };
         // Le moteur va écouter ces sources : leur écoute s'arrête avant.
-        for source in &scene.sources {
+        for source in &sources {
             self.meters.borrow().pause(&source.id);
         }
         match Session::start(self.platform.clone(), plan) {
@@ -1117,7 +1142,7 @@ impl App {
                     b.set_elapsed("00:00:00".into());
                     b.set_sheet("".into());
                 });
-                let ids: Vec<&str> = scene.sources.iter().map(|s| s.id.as_str()).collect();
+                let ids: Vec<&str> = sources.iter().map(|s| s.id.as_str()).collect();
                 for i in 0..self.cards.row_count() {
                     self.update_card(i, |card| {
                         if ids.contains(&card.id.as_str()) {
@@ -1130,8 +1155,8 @@ impl App {
                 let (message, tone) = if let Some(note) = &prepared.output_note {
                     (format!("Enregistrement démarré. {note}"), 2)
                 } else if prepared.missing.is_empty() {
-                    let message = match scene.sources.as_slice() {
-                        [single] if config.active_scene().sources.len() > 1 => {
+                    let message = match sources.as_slice() {
+                        [single] if scene.source_ids.len() > 1 => {
                             format!("Enregistrement de « {} » démarré.", single.name)
                         }
                         _ => "Enregistrement démarré.".to_string(),
@@ -1164,7 +1189,7 @@ impl App {
         if self.busy.get() || self.joining.borrow().contains(id) {
             return;
         }
-        let Some(source) = self.config.borrow().active_scene().sources.iter().find(|s| s.id == id).cloned() else {
+        let Some(source) = self.active_source(id) else {
             return;
         };
         let state = self.session.borrow().as_ref().map(|s| (s.is_recording(id), s.recording_count()));
@@ -1487,8 +1512,7 @@ impl App {
             }
         }
         for id in due {
-            let source = self.config.borrow().active_scene().sources.iter().find(|s| s.id == id).cloned();
-            let Some(source) = source.filter(Source::should_launch) else {
+            let Some(source) = self.active_source(&id).filter(Source::should_launch) else {
                 continue;
             };
             if let Some(entry) = self.lost_windows.borrow_mut().get_mut(&id) {
@@ -2117,6 +2141,14 @@ impl App {
         });
     }
 
+    fn open_scene_sheet_duplicate(&self) {
+        let name = format!("{} (copie)", self.config.borrow().active_scene().name);
+        self.with_bridge(|b| {
+            b.set_scene_name_input(name.into());
+            b.set_sheet("scene-duplicate".into());
+        });
+    }
+
     fn confirm_scene_name(&self) {
         if self.locked() {
             return;
@@ -2130,21 +2162,30 @@ impl App {
             self.toast("Indique un nom de scène.", 2);
             return;
         }
-        let new = bridge.get_sheet() == "scene-new";
+        let mode = bridge.get_sheet();
         {
             let mut config = self.config.borrow_mut();
-            if new {
-                let scene = Scene::new(&name);
-                config.active_scene = scene.id.clone();
-                config.scenes.push(scene);
-            } else {
-                config.active_scene_mut().name = name;
+            match mode.as_str() {
+                "scene-new" => {
+                    let scene = Scene::new(&name);
+                    config.active_scene = scene.id.clone();
+                    config.scenes.push(scene);
+                }
+                "scene-duplicate" => {
+                    let id = config.active_scene.clone();
+                    config.duplicate_scene(&id, &name);
+                }
+                _ => config.active_scene_mut().name = name,
             }
         }
         bridge.set_sheet("".into());
         self.save();
+        let changed_scene = mode != "scene-rename";
+        if changed_scene {
+            bridge.set_selected_source(-1);
+        }
         self.refresh_all();
-        if new {
+        if changed_scene {
             self.restart_previews();
         }
     }
@@ -2159,12 +2200,28 @@ impl App {
             1 => " Sa programmation aussi.".to_string(),
             n => format!(" Ses {n} programmations aussi."),
         };
+        // Les sources partagées avec d'autres scènes y restent.
+        let (total, only_here) = {
+            let config = self.config.borrow();
+            (config.scene(&id).map_or(0, |s| s.source_ids.len()), config.sources_only_in(&id).len())
+        };
+        let sources = if total == 0 {
+            format!("La scène « {name} » sera supprimée.")
+        } else if only_here == 0 {
+            format!("La scène « {name} » sera supprimée. Ses sources restent dans les autres scènes.")
+        } else if only_here == total {
+            format!("La scène « {name} » et ses sources seront supprimées.")
+        } else {
+            let gone = match only_here {
+                1 => "la source qui n'est".to_string(),
+                n => format!("les {n} sources qui ne sont"),
+            };
+            format!("La scène « {name} » sera supprimée, ainsi que {gone} dans aucune autre scène.")
+        };
         self.ask(
             Confirm::DeleteScene,
             "Supprimer la scène",
-            &format!(
-                "La scène « {name} » et ses sources seront supprimées.{schedules} Les profils de navigateur restent sur le disque."
-            ),
+            &format!("{sources}{schedules} Les profils de navigateur restent sur le disque."),
             "Supprimer",
         );
     }
@@ -2175,7 +2232,7 @@ impl App {
         let browsers = self.platform.detect_browsers();
         let mut choices: Vec<SharedString> = browsers.iter().map(|b| b.name.as_str().into()).collect();
         choices.push("Autre navigateur…".into());
-        let count = self.config.borrow().active_scene().sources.len() + 1;
+        let count = self.config.borrow().active_scene().source_ids.len() + 1;
         let default_name = browsers
             .first()
             .map(|b| format!("{} {count}", b.name.split_whitespace().last().unwrap_or(&b.name)))
@@ -2234,7 +2291,7 @@ impl App {
         );
         let open_now = bridge.get_open_now();
         let name = source.name.clone();
-        self.config.borrow_mut().active_scene_mut().sources.push(source.clone());
+        self.config.borrow_mut().add_source(source.clone());
         bridge.set_sheet("".into());
         self.save();
         self.refresh_all();
@@ -2310,7 +2367,7 @@ impl App {
         let source =
             Source::application(&bridge.get_new_name(), &window, bridge.get_relaunch(), bridge.get_capture_cursor());
         let name = source.name.clone();
-        self.config.borrow_mut().active_scene_mut().sources.push(source);
+        self.config.borrow_mut().add_source(source);
         bridge.set_sheet("".into());
         self.save();
         self.refresh_all();
@@ -2318,51 +2375,132 @@ impl App {
         self.toast(&format!("« {name} » ajoutée."), 1);
     }
 
+    /// Source de la scène active.
+    fn active_source(&self, id: &str) -> Option<Source> {
+        let config = self.config.borrow();
+        config.active_scene().contains(id).then(|| config.source(id).cloned()).flatten()
+    }
+
     fn selected_source(&self) -> Option<Source> {
         let index = self.ui.upgrade()?.global::<Bridge>().get_selected_source();
-        self.config.borrow().active_scene().sources.get(index.max(0) as usize).cloned().filter(|_| index >= 0)
+        let config = self.config.borrow();
+        let id = config.active_scene().source_ids.get(usize::try_from(index).ok()?)?;
+        config.source(id).cloned()
     }
 
     fn request_remove_source(&self) {
         let Some(source) = self.selected_source() else {
             return;
         };
-        let detail = if source.is_browser() { " Son profil de navigateur reste sur le disque." } else { "" };
-        self.ask(
-            Confirm::RemoveSource(source.id.clone()),
-            "Supprimer la source",
-            &format!("La source « {} » sera retirée de la scène.{detail}", source.name),
-            "Supprimer",
-        );
+        let others: Vec<String> = {
+            let config = self.config.borrow();
+            config
+                .scenes_with(&source.id)
+                .into_iter()
+                .filter(|s| s.id != config.active_scene)
+                .map(|s| format!("« {} »", s.name))
+                .collect()
+        };
+        let text = if others.is_empty() {
+            let detail = if source.is_browser() { " Son profil de navigateur reste sur le disque." } else { "" };
+            format!("La source « {} » sera supprimée.{detail}", source.name)
+        } else {
+            format!(
+                "La source « {} » sera retirée de cette scène seulement : elle reste dans {}.",
+                source.name,
+                format::join_list(&others)
+            )
+        };
+        self.ask(Confirm::RemoveSource(source.id.clone()), "Supprimer la source", &text, "Supprimer");
     }
 
+    /// Mémorise la source sélectionnée, pour la coller dans une autre scène.
+    /// Possible pendant un enregistrement : rien ne change.
+    fn copy_source(&self) {
+        let Some(source) = self.selected_source() else {
+            return;
+        };
+        *self.copied_source.borrow_mut() = Some(source.id.clone());
+        let can_paste = self.can_paste();
+        self.with_bridge(|b| b.set_can_paste(can_paste));
+        self.toast(&format!("« {} » copiée : colle-la dans une autre scène avec Ctrl+V.", source.name), 1);
+    }
+
+    /// La source copiée existe encore et n'est pas déjà dans la scène active
+    /// (le collage reste refusé avec une explication au clavier).
+    fn can_paste(&self) -> bool {
+        let config = self.config.borrow();
+        self.copied_source
+            .borrow()
+            .as_deref()
+            .is_some_and(|id| config.source(id).is_some() && !config.active_scene().contains(id))
+    }
+
+    /// Ajoute la source copiée à la scène active : la même source (même
+    /// fenêtre, même profil de navigateur), pas une copie.
+    fn paste_source(&self) {
+        if self.recording() {
+            self.toast("Arrête l'enregistrement pour coller une source.", 2);
+            return;
+        }
+        if self.busy.get() {
+            return;
+        }
+        let Some(id) = self.copied_source.borrow().clone() else {
+            self.toast("Copie d'abord une source (Ctrl+C), puis colle-la ici (Ctrl+V).", 2);
+            return;
+        };
+        let result = self.config.borrow_mut().paste_source(&id);
+        let (name, scene) = {
+            let config = self.config.borrow();
+            (config.source(&id).map(|s| s.name.clone()).unwrap_or_default(), config.active_scene().name.clone())
+        };
+        match result {
+            Ok(()) => {
+                let index = self.config.borrow().active_scene().source_ids.len() as i32 - 1;
+                self.save();
+                self.refresh_all();
+                self.with_bridge(|b| b.set_selected_source(index));
+                self.restart_previews();
+                self.toast(&format!("« {name} » collée dans « {scene} » : c'est la même source, partagée."), 1);
+            }
+            Err(PasteError::AlreadyInScene) => self
+                .toast(&format!("« {name} » est déjà dans cette scène : une même source n'y figure qu'une fois."), 2),
+            Err(PasteError::Missing) => {
+                self.copied_source.borrow_mut().take();
+                self.refresh_all();
+                self.toast("La source copiée a été supprimée entre-temps.", 2);
+            }
+        }
+    }
+
+    /// Flèches : la source sélectionnée monte ou descend d'un rang.
     fn move_source(&self, delta: i32) {
+        let index = self.with_bridge_value(|b| b.get_selected_source());
+        self.move_source_to(index, index + delta);
+    }
+
+    /// Glisser-déposer (liste ou grille des aperçus) et flèches : la source
+    /// passe de la position `from` à la position `to`, puis est
+    /// sélectionnée.
+    fn move_source_to(&self, from: i32, to: i32) {
         if self.locked() {
             return;
         }
-        let Some(ui) = self.ui.upgrade() else {
+        let (Ok(from), Ok(to)) = (usize::try_from(from), usize::try_from(to)) else {
             return;
         };
-        let bridge = ui.global::<Bridge>();
-        let index = bridge.get_selected_source();
-        let target = index + delta;
-        {
-            let mut config = self.config.borrow_mut();
-            let sources = &mut config.active_scene_mut().sources;
-            if index < 0 || target < 0 || target as usize >= sources.len() {
-                return;
-            }
-            sources.swap(index as usize, target as usize);
+        if !self.config.borrow_mut().move_source(from, to) {
+            return;
         }
-        bridge.set_selected_source(target);
+        self.with_bridge(|b| b.set_selected_source(to as i32));
         self.save();
         self.refresh_all();
         self.restart_previews();
     }
 
     fn open_source(&self, id: &str) {
-        let source = self.config.borrow().active_scene().sources.iter().find(|s| s.id == id).cloned();
-        let Some(source) = source else {
+        let Some(source) = self.active_source(id) else {
             return;
         };
         if let SourceKind::Application { exe_path, .. } = &source.kind {
@@ -2396,7 +2534,7 @@ impl App {
             return;
         }
         let sources: Vec<Source> =
-            self.config.borrow().active_scene().sources.iter().filter(|s| s.should_launch()).cloned().collect();
+            self.config.borrow().active_sources().into_iter().filter(Source::should_launch).collect();
         if sources.is_empty() {
             if !auto {
                 self.toast(
@@ -2453,8 +2591,7 @@ impl App {
     /// écran branché si besoin. Hors du fil de l'interface : la fenêtre d'un
     /// programme figé pourrait faire attendre.
     fn restore_window(&self, id: &str) {
-        let source = self.config.borrow().active_scene().sources.iter().find(|s| s.id == id).cloned();
-        let Some(source) = source else {
+        let Some(source) = self.active_source(id) else {
             return;
         };
         // Pendant l'enregistrement : la fenêtre suivie par le moteur. Sinon,
@@ -2800,7 +2937,7 @@ impl App {
                 self.restart_previews();
             }
             Some(Confirm::RemoveSource(id)) => {
-                self.config.borrow_mut().active_scene_mut().sources.retain(|s| s.id != id);
+                self.config.borrow_mut().remove_source(&id);
                 self.save();
                 self.refresh_all();
                 self.restart_previews();
@@ -2904,8 +3041,7 @@ impl App {
     /// confondues, comme un clic sur leur croix. Les applications restent
     /// ouvertes.
     fn close_source_browsers(&self) {
-        let sources: Vec<Source> =
-            self.config.borrow().scenes.iter().flat_map(|scene| scene.sources.iter().cloned()).collect();
+        let sources = self.config.borrow().sources.clone();
         let windows = self.platform.list_windows();
         let targets = resolve::browser_windows(self.platform.as_ref(), &sources, &windows);
         let mut closed = 0;
@@ -3132,7 +3268,7 @@ impl App {
 
 /// Recherche de l'encodeur et ouverture des fenêtres (hors du fil de
 /// l'interface : peut durer plusieurs secondes).
-fn prepare(platform: &dyn Platform, config: &Config, scene: &Scene) -> Result<Prepared> {
+fn prepare(platform: &dyn Platform, config: &Config, sources: &[Source]) -> Result<Prepared> {
     let ffmpeg = probe::locate_ffmpeg()
         .ok_or_else(|| anyhow!("FFmpeg introuvable : ffmpeg.exe doit se trouver à côté de polyptyque.exe"))?;
     let video = &config.settings.video;
@@ -3158,7 +3294,7 @@ fn prepare(platform: &dyn Platform, config: &Config, scene: &Scene) -> Result<Pr
         (fallback, Some(note))
     };
     post(|app| app.set_busy("Ouverture des fenêtres…"));
-    let missing = resolve::prepare_windows(platform, &scene.sources, LAUNCH_WAIT, |event| {
+    let missing = resolve::prepare_windows(platform, sources, LAUNCH_WAIT, |event| {
         if let PrepareEvent::Launching(source) = event {
             let text = format!("Ouverture de « {} »…", source.name);
             post(move |app| app.set_busy(&text));
