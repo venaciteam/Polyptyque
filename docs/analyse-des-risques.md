@@ -18,6 +18,9 @@ type: projet
 > [!success] Mise à jour du 2026-10-22
 > Le **lot 1** est réalisé (à tester sur la machine de référence), ainsi que, des lots 2 et 3 : conversion MP4 sous nom temporaire (A6), mise en veille (B3), relance après un redémarrage (B2), bascule sur le processeur (D2), nettoyage des journaux (A7). Les colonnes « Aujourd'hui » décrivent l'état **avant** ces travaux ; le [[#Plan d'action proposé|plan d'action]] indique ce qui est fait.
 
+> [!success] Mise à jour du 2026-10-23
+> Programmation des enregistrements ajoutée (voir le [[cahier-des-charges#Programmation des enregistrements|cahier des charges]]) : nouveaux scénarios B10, B11 et E11. Le redémarrage par Windows Update (B2) est aussi couvert par l'option « Lancer Polyptyque au démarrage de Windows ».
+
 ## Table des matières
 
 1. [[#Principes]]
@@ -85,7 +88,9 @@ Chaque scénario porte un identifiant (A1, B3…) repris dans le plan d'action.
 | B6 | Redémarrage du pilote graphique | faible | forte | Probable (non testé) : capture perdue puis rattachée, encodeur relancé dans une nouvelle partie | Rien à ajouter si le test le confirme | test |
 | B7 | Changement de sortie audio (casque branché, enceintes) | forte | moyenne | Le son est capté par programme et non par sortie ; effet d'un changement de sortie : **à vérifier** | Selon le test | test |
 | B8 | Batterie critique | faible | forte | Arrêt non bloquable (voulu) ; finalisation tentée | Rien à ajouter | — |
-| B9 | Changement d'heure (été/hiver, fuseau) | forte | faible | Horloge interne indépendante de l'heure affichée ; seuls les noms de fichiers utilisent l'heure de départ | Rien à ajouter | — |
+| B9 | Changement d'heure (été/hiver, fuseau) | forte | faible | Horloge interne indépendante de l'heure affichée ; seuls les noms de fichiers utilisent l'heure de départ. Programmations : créneaux calculés sur l'heure affichée, heure inexistante décalée, heure double prise à sa première occurrence (vérifié par des tests avec le fuseau Europe/Paris) | Rien à ajouter | — |
+| B10 | Enregistrement programmé manqué : Polyptyque fermé, ordinateur en veille ou redémarré à l'heure prévue | moyenne | forte | Programmation ajoutée le 2026-10-23 : veille automatique et extinction de l'écran empêchées tant qu'une programmation est active ; lancement au démarrage de Windows (option) ; au retour pendant le créneau, question avec compte à rebours de deux minutes, enregistrement lancé sans réponse ; plantage ou arrêt de Windows pendant un enregistrement programmé : même question au retour | Plus tard : lancement par Windows à l'heure prévue (Planificateur de tâches), sortie de veille automatique | — |
+| B11 | Enregistrement programmé qui démarre session verrouillée, écran éteint (connexion automatique de Windows après une mise à jour, par exemple) | moyenne | forte | Capture dans ces conditions : **à vérifier** | Selon le test ([[protocole-test-programmation]]) | test |
 
 ## C - Programmes capturés
 
@@ -123,6 +128,7 @@ Chaque scénario porte un identifiant (A1, B3…) repris dans le plan d'action.
 | E8 | Oublier un enregistrement en cours | moyenne | moyenne | Arrêt automatique quand le disque est presque plein | Durée maximale facultative dans les réglages | P3 |
 | E9 | Déplacer ou renommer un fichier en cours d'enregistrement | faible | forte | **À vérifier** | Selon le test | test |
 | E10 | Modifier une scène pendant un enregistrement | moyenne | faible | Impossible (scènes verrouillées) | Rien à ajouter | — |
+| E11 | Arrêter par erreur un enregistrement programmé, ou le laisser arrêter un enregistrement manuel | moyenne | moyenne | Arrêt à la main d'un enregistrement programmé confirmé ; un enregistrement manuel n'est arrêté en fin de créneau que si on l'accepte (non par défaut) ; programmation en cours d'enregistrement ni modifiable ni supprimable | Rien à ajouter | — |
 
 ---
 
@@ -165,6 +171,7 @@ Chaque scénario porte un identifiant (A1, B3…) repris dans le plan d'action.
 > - [x] **Limite d'encodages de la carte NVIDIA** (D2) : bascule automatique sur le processeur pour la source refusée.
 > - [ ] **FAT32** (D5) : avertissement et découpage propre avant 4 Go.
 > - [x] **Conversion MP4** (A6) : nom temporaire jusqu'à la vérification.
+> - [x] **Programmation** (B10, E11) : anti-veille, lancement au démarrage de Windows, question du démarrage manqué, confirmations (réalisé le 2026-10-23, à tester sur la machine de référence).
 
 ### Lot 3 - Confort et prévention
 
@@ -193,6 +200,7 @@ Chaque scénario porte un identifiant (A1, B3…) repris dans le plan d'action.
 | Mise en veille | Démarrer > Marche/Arrêt > Mettre en veille pendant un enregistrement, réveiller après deux minutes | Fichiers lisibles, durée du rattrapage d'images figées, image et son repris après le réveil (B3) |
 | Renommage | Renommer un MKV en cours d'enregistrement dans l'Explorateur | Refus de Windows ou effet sur l'enregistrement (E9) |
 | Mémoire | Relever la mémoire de Polyptyque et des FFmpeg au début et à la fin du test de 12 h | Pas de croissance continue (A9) |
+| Programmation verrouillée | Verrouiller la session avant le début d'un créneau, puis éteindre l'écran avec son bouton ; déverrouiller après quelques minutes | Enregistrement démarré à l'heure, image présente dans les fichiers (B11) |
 
 ---
 

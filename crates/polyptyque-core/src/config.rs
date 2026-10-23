@@ -13,6 +13,7 @@ use crate::browsers::program_name;
 use crate::naming::{self, DEFAULT_TEMPLATE};
 use crate::paths;
 use crate::platform::{BrowserInstall, WindowInfo};
+use crate::schedule::Schedule;
 use crate::storage;
 
 pub const CONFIG_VERSION: u32 = 1;
@@ -29,6 +30,8 @@ pub struct Config {
     pub active_scene: String,
     pub settings: Settings,
     pub scenes: Vec<Scene>,
+    /// Programmations des enregistrements (chacune lance une scène).
+    pub schedules: Vec<Schedule>,
 }
 
 impl Default for Config {
@@ -39,6 +42,7 @@ impl Default for Config {
             active_scene: scene.id.clone(),
             settings: Settings::default(),
             scenes: vec![scene],
+            schedules: Vec::new(),
         }
     }
 }
@@ -90,7 +94,9 @@ impl Config {
     }
 
     /// Garantit les invariants : au moins une scène, une scène active valide,
-    /// des réglages dans les bornes.
+    /// des programmations qui lancent des scènes existantes (celles d'une
+    /// scène supprimée disparaissent avec elle), des réglages dans les
+    /// bornes.
     pub fn normalize(&mut self) {
         if self.scenes.is_empty() {
             self.scenes.push(Scene::new("Scène principale"));
@@ -98,6 +104,8 @@ impl Config {
         if !self.scenes.iter().any(|s| s.id == self.active_scene) {
             self.active_scene = self.scenes[0].id.clone();
         }
+        let scenes = &self.scenes;
+        self.schedules.retain(|schedule| scenes.iter().any(|scene| scene.id == schedule.scene_id));
         self.settings.video.normalize();
         self.settings.audio.normalize();
         if self.settings.filename_template.trim().is_empty() {
@@ -147,6 +155,10 @@ impl Config {
 
     pub fn active_scene(&self) -> &Scene {
         self.scenes.iter().find(|s| s.id == self.active_scene).unwrap_or(&self.scenes[0])
+    }
+
+    pub fn scene(&self, id: &str) -> Option<&Scene> {
+        self.scenes.iter().find(|s| s.id == id)
     }
 
     pub fn active_scene_mut(&mut self) -> &mut Scene {
@@ -347,6 +359,9 @@ pub struct Settings {
     /// sources (profils dédiés, toutes scènes confondues). Les applications
     /// ne sont jamais fermées.
     pub close_browsers_at_exit: bool,
+    /// Lancer Polyptyque à l'ouverture de la session Windows (réduit), pour
+    /// que les programmations survivent à un redémarrage.
+    pub launch_at_startup: bool,
     pub video: VideoSettings,
     pub audio: AudioSettings,
     pub microphone: MicrophoneSettings,
@@ -364,6 +379,7 @@ impl Default for Settings {
             update_channel: None,
             open_windows_at_launch: true,
             close_browsers_at_exit: true,
+            launch_at_startup: false,
             video: VideoSettings::default(),
             audio: AudioSettings::default(),
             microphone: MicrophoneSettings::default(),
@@ -706,6 +722,24 @@ mod tests {
     }
 
     #[test]
+    fn schedules_follow_their_scene() {
+        use crate::schedule::{Repeat, TimeOfDay};
+        let mut config = sample();
+        let scene = config.active_scene.clone();
+        let start = TimeOfDay::new(21, 0).unwrap();
+        let end = TimeOfDay::new(22, 0).unwrap();
+        config.schedules.push(Schedule::new(&scene, start, end, Repeat::Weekly { days: vec![1, 2, 3] }));
+        let text = toml::to_string_pretty(&config).unwrap();
+        let mut back: Config = toml::from_str(&text).unwrap();
+        assert_eq!(back.schedules, config.schedules);
+        // Scène supprimée : ses programmations aussi.
+        back.scenes.push(Scene::new("Autre"));
+        back.scenes.retain(|s| s.id != scene);
+        back.normalize();
+        assert!(back.schedules.is_empty());
+    }
+
+    #[test]
     fn source_constructors() {
         let browser = BrowserRef {
             name: "Firefox".into(),
@@ -741,6 +775,8 @@ mod tests {
         assert!(config.settings.previews);
         assert_eq!(config.settings.hotkeys.toggle_recording, "Ctrl+Maj+F9");
         assert_eq!(config.settings.update_channel, None);
+        assert!(!config.settings.launch_at_startup);
+        assert!(config.schedules.is_empty());
     }
 
     #[test]

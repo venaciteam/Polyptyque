@@ -29,13 +29,15 @@ pub enum Instance {
     /// Première copie ouverte dans cette session Windows.
     First(InstanceLock),
     /// Polyptyque était déjà ouvert : sa fenêtre a été ramenée au premier
-    /// plan.
+    /// plan (sauf demande contraire).
     AlreadyOpen,
 }
 
 /// Prend le verrou de cette session Windows, ou ramène au premier plan la
-/// copie déjà ouverte.
-pub fn acquire() -> Instance {
+/// copie déjà ouverte si `bring_to_front` (pas quand Windows relance
+/// Polyptyque de lui-même à l'ouverture de session : une copie déjà
+/// lancée reste comme elle est).
+pub fn acquire(bring_to_front: bool) -> Instance {
     let handle = match unsafe { CreateMutexW(None, false, w!("Local\\Polyptyque-instance")) } {
         Ok(handle) => handle,
         Err(e) => {
@@ -49,7 +51,9 @@ pub fn acquire() -> Instance {
     unsafe {
         let _ = CloseHandle(handle);
     }
-    show_existing();
+    if bring_to_front {
+        show_existing();
+    }
     Instance::AlreadyOpen
 }
 

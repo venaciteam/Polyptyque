@@ -2,14 +2,14 @@
 
 import { ListView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
-import { Bridge, IncidentFile, SceneItem, SourceItem, SourceCard, WindowItem } from "bridge.slint";
+import { Bridge, IncidentFile, SceneItem, ScheduleItem, SourceItem, SourceCard, WindowItem } from "bridge.slint";
 import { ActionButton, IconButton, LevelMeter, ListRow, Panel, SourceCardView, Toggle } from "components.slint";
 import {
-    AddApplicationSheet, AddBrowserSheet, BusyOverlay, ConfirmSheet, IncidentSheet, SceneNameSheet, SettingsSheet,
-    Toast,
+    AddApplicationSheet, AddBrowserSheet, BusyOverlay, ConfirmSheet, IncidentSheet, SceneNameSheet, ScheduleEditorSheet,
+    SchedulePrompt, SchedulesSheet, SettingsSheet, Toast,
 } from "sheets.slint";
 
-export { Bridge, IncidentFile, SceneItem, SourceItem, SourceCard, WindowItem }
+export { Bridge, IncidentFile, SceneItem, ScheduleItem, SourceItem, SourceCard, WindowItem }
 
 // Logo : trois panneaux, comme un polyptyque.
 component Logo inherits HorizontalLayout {
@@ -103,6 +103,48 @@ component UpdatePill inherits Rectangle {
         mouse-cursor: pointer;
         clicked => {
             Bridge.install-update();
+        }
+    }
+}
+
+// Programmation : prochain créneau, ou fin prévue de l'enregistrement
+// programmé ; « Programmer » s'il n'y en a pas. Clic : les programmations.
+component SchedulePill inherits Rectangle {
+    property <bool> planned: Bridge.schedule-text != "";
+
+    height: 30px;
+    width: row.preferred-width;
+    border-radius: 15px;
+    background: touch.has-hover ? Theme.surface-hover : Theme.surface-raised;
+    border-width: 1px;
+    border-color: Bridge.schedule-running ? Theme.recording.with-alpha(0.6)
+        : root.planned ? Theme.accent.with-alpha(0.5) : Theme.border;
+    accessible-role: button;
+    accessible-label: root.planned ? "Programmations : \{Bridge.schedule-text}" : "Programmer des enregistrements";
+
+    row := HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 14px;
+        spacing: 8px;
+        Image {
+            source: @image-url("icons/clock.svg");
+            width: 14px;
+            height: 14px;
+            y: (parent.height - self.height) / 2;
+            colorize: Bridge.schedule-running ? Theme.recording : root.planned ? Theme.accent : Theme.text-muted;
+        }
+        Text {
+            text: root.planned ? Bridge.schedule-text : "Programmer";
+            color: root.planned ? Theme.text : Theme.text-muted;
+            font-size: Theme.font-small;
+            font-weight: 600;
+            vertical-alignment: center;
+        }
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            Bridge.open-schedules();
         }
     }
 }
@@ -231,6 +273,9 @@ component TopBar inherits HorizontalLayout {
         min-width: 0;
     }
     if Bridge.update-state != "": UpdatePill {
+        y: (parent.height - self.height) / 2;
+    }
+    SchedulePill {
         y: (parent.height - self.height) / 2;
     }
     if Bridge.mic-enabled || Bridge.mic-recording: MicPill {
@@ -587,14 +632,28 @@ export component AppWindow inherits Window {
         width: root.width;
         height: root.height;
     }
+    if Bridge.sheet == "schedules": SchedulesSheet {
+        width: root.width;
+        height: root.height;
+    }
+    if Bridge.sheet == "schedule-new" || Bridge.sheet == "schedule-edit": ScheduleEditorSheet {
+        width: root.width;
+        height: root.height;
+    }
     if Bridge.sheet == "confirm": ConfirmSheet {
+        width: root.width;
+        height: root.height;
+    }
+    // Question de la programmation : au-dessus des autres fenêtres modales,
+    // pour qu'un compte à rebours ne reste jamais caché.
+    if Bridge.prompt-kind != "": SchedulePrompt {
         width: root.width;
         height: root.height;
     }
     // Les messages restent visibles au-dessus des fenêtres modales.
     if Bridge.toast-text != "": Toast {
         x: (root.width - self.width) / 2;
-        y: Bridge.sheet == "" ? root.height - self.height - 262px : root.height - self.height - 24px;
+        y: Bridge.sheet == "" && Bridge.prompt-kind == "" ? root.height - self.height - 262px : root.height - self.height - 24px;
     }
     if Bridge.busy-text != "": BusyOverlay {
         width: root.width;

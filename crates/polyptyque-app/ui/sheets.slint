@@ -2,8 +2,8 @@
 
 import { ComboBox, LineEdit, CheckBox, ListView, Spinner } from "std-widgets.slint";
 import { Theme } from "theme.slint";
-import { Bridge } from "bridge.slint";
-import { ActionButton, Field, Footer, LevelMeter, Note, Sheet, ListRow, Toggle } from "components.slint";
+import { Bridge, ScheduleItem } from "bridge.slint";
+import { ActionButton, Field, Footer, IconButton, LevelMeter, Note, Sheet, ListRow, Toggle } from "components.slint";
 
 export component AddBrowserSheet inherits Sheet {
     title: "Ajouter une source navigateur";
@@ -432,6 +432,13 @@ export component SettingsSheet inherits Sheet {
                     Bridge.settings-close-browsers = value;
                 }
             }
+            Toggle {
+                text: "Lancer Polyptyque au démarrage de Windows";
+                checked: Bridge.settings-startup;
+                toggled(value) => {
+                    Bridge.settings-startup = value;
+                }
+            }
             Field {
                 label: "Conversion pour le montage";
                 hint: "Copie MP4 sans perte de qualité, créée à côté du MKV, qui est conservé. Prévois le double d'espace disque.";
@@ -571,6 +578,327 @@ export component Toast inherits Rectangle {
         mouse-cursor: pointer;
         clicked => {
             Bridge.dismiss-toast();
+        }
+    }
+}
+
+// Programmation dans la liste : activée ou non, description, prochain
+// créneau, boutons pour la modifier ou la supprimer.
+component ScheduleRow inherits Rectangle {
+    in property <ScheduleItem> item;
+
+    height: 58px;
+    border-radius: Theme.radius-small;
+    background: Theme.surface-raised;
+    border-width: 1px;
+    border-color: root.item.locked ? Theme.recording.with-alpha(0.55) : Theme.border;
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 8px;
+        spacing: 12px;
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 0;
+            Toggle {
+                width: 36px;
+                text: "";
+                checked: root.item.enabled;
+                opacity: root.item.locked ? 0.4 : 1;
+                accessible-label: root.item.enabled ? "Désactiver la programmation" : "Activer la programmation";
+                toggled(value) => {
+                    if !root.item.locked {
+                        Bridge.toggle-schedule(root.item.id, value);
+                    }
+                }
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: 3px;
+            horizontal-stretch: 1;
+            Text {
+                text: "\{root.item.scene} · \{root.item.times}";
+                color: root.item.enabled ? Theme.text : Theme.text-muted;
+                font-weight: 600;
+                overflow: elide;
+            }
+            Text {
+                text: "\{root.item.repeat} · \{root.item.next}";
+                color: root.item.locked ? Theme.recording : Theme.text-faint;
+                font-size: Theme.font-small;
+                overflow: elide;
+            }
+        }
+        IconButton {
+            y: (parent.height - self.height) / 2;
+            icon: @image-url("icons/edit.svg");
+            label: "Modifier la programmation";
+            enabled: !root.item.locked;
+            clicked => {
+                Bridge.edit-schedule(root.item.id);
+            }
+        }
+        IconButton {
+            y: (parent.height - self.height) / 2;
+            icon: @image-url("icons/trash.svg");
+            label: "Supprimer la programmation";
+            enabled: !root.item.locked;
+            clicked => {
+                Bridge.delete-schedule(root.item.id);
+            }
+        }
+    }
+}
+
+// Liste des programmations et lancement au démarrage de Windows.
+export component SchedulesSheet inherits Sheet {
+    title: "Programmations";
+    sheet-width: 640px;
+    close => {
+        Bridge.close-sheet();
+    }
+
+    Text {
+        text: "Polyptyque lance et arrête lui-même l'enregistrement d'une scène aux heures prévues. Il doit rester ouvert pour cela ; tant qu'une programmation est active, l'ordinateur et l'écran ne se mettent pas en veille d'eux-mêmes.";
+        color: Theme.text-muted;
+        wrap: word-wrap;
+    }
+    if Bridge.schedules.length == 0: Text {
+        text: "Aucune programmation pour l'instant.";
+        color: Theme.text-faint;
+    }
+    if Bridge.schedules.length > 0: VerticalLayout {
+        spacing: 8px;
+        for item in Bridge.schedules: ScheduleRow {
+            item: item;
+        }
+    }
+    HorizontalLayout {
+        alignment: start;
+        ActionButton {
+            text: "Nouvelle programmation";
+            icon: @image-url("icons/plus.svg");
+            has-icon: true;
+            kind: "primary";
+            clicked => {
+                Bridge.edit-schedule("");
+            }
+        }
+    }
+    Field {
+        label: "Démarrage de Windows";
+        hint: "Sans cela, après un redémarrage de Windows (une mise à jour, par exemple), les programmations attendent que tu rouvres Polyptyque. Lancé par Windows, il démarre réduit, sans ouvrir les fenêtres de la scène.";
+        Toggle {
+            text: "Lancer Polyptyque au démarrage de Windows";
+            checked: Bridge.startup-enabled;
+            toggled(value) => {
+                Bridge.set-launch-at-startup(value);
+            }
+        }
+    }
+    if Bridge.startup-note != "": Note {
+        tone: 2;
+        text: Bridge.startup-note;
+    }
+    Footer {
+        ActionButton {
+            text: "Fermer";
+            kind: "ghost";
+            clicked => {
+                Bridge.close-sheet();
+            }
+        }
+    }
+}
+
+// Jour de la semaine à cocher.
+component DayChip inherits Rectangle {
+    in property <string> text;
+    in property <string> label;
+    in property <bool> selected;
+    callback clicked;
+
+    width: 38px;
+    height: 34px;
+    border-radius: Theme.radius-small;
+    background: root.selected ? (touch.has-hover ? Theme.accent-hover : Theme.accent)
+        : (touch.has-hover ? Theme.surface-hover : Theme.surface-raised);
+    border-width: root.selected ? 0 : 1px;
+    border-color: Theme.border;
+    accessible-role: checkbox;
+    accessible-checked: root.selected;
+    accessible-label: root.label;
+    animate background { duration: 120ms; }
+
+    Text {
+        text: root.text;
+        color: root.selected ? #ffffff : Theme.text;
+        font-weight: 600;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+// Formulaire d'une programmation.
+export component ScheduleEditorSheet inherits Sheet {
+    property <[string]> day-letters: ["L", "M", "M", "J", "V", "S", "D"];
+    property <[string]> day-names: ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"];
+
+    title: Bridge.sheet == "schedule-new" ? "Nouvelle programmation" : "Modifier la programmation";
+    sheet-width: 520px;
+    close => {
+        Bridge.close-schedule-editor();
+    }
+
+    Field {
+        label: "Scène à enregistrer";
+        ComboBox {
+            model: Bridge.schedule-scene-choices;
+            current-index <=> Bridge.schedule-scene-index;
+        }
+    }
+    HorizontalLayout {
+        spacing: 12px;
+        Field {
+            label: "Début";
+            horizontal-stretch: 1;
+            LineEdit {
+                text <=> Bridge.schedule-start;
+                placeholder-text: "21:00";
+                edited(text) => {
+                    Bridge.schedule-times-edited();
+                }
+            }
+        }
+        Field {
+            label: "Fin";
+            horizontal-stretch: 1;
+            LineEdit {
+                text <=> Bridge.schedule-end;
+                placeholder-text: "22:30";
+                edited(text) => {
+                    Bridge.schedule-times-edited();
+                }
+            }
+        }
+    }
+    if Bridge.schedule-times-note != "": Text {
+        text: Bridge.schedule-times-note;
+        color: Theme.text-faint;
+        font-size: Theme.font-small;
+    }
+    Field {
+        label: "Répétition";
+        ComboBox {
+            model: ["Une seule fois", "Tous les jours", "Certains jours de la semaine"];
+            current-index <=> Bridge.schedule-repeat-index;
+        }
+    }
+    if Bridge.schedule-repeat-index == 0: Field {
+        label: "Date";
+        hint: "Jour où le créneau commence.";
+        LineEdit {
+            text <=> Bridge.schedule-date;
+            placeholder-text: "25/10/2026";
+        }
+    }
+    if Bridge.schedule-repeat-index == 2: Field {
+        label: "Jours où le créneau commence";
+        HorizontalLayout {
+            spacing: 6px;
+            alignment: start;
+            for letter[index] in root.day-letters: DayChip {
+                text: letter;
+                label: root.day-names[index];
+                selected: Bridge.schedule-days[index];
+                clicked => {
+                    Bridge.toggle-schedule-day(index);
+                }
+            }
+        }
+    }
+    Note {
+        text: "Polyptyque doit être ouvert à l'heure prévue. S'il était fermé, ou l'ordinateur en veille, il demande à son retour s'il faut lancer l'enregistrement : sans réponse au bout de deux minutes, il le lance.";
+    }
+    if Bridge.schedule-error != "": Note {
+        tone: 3;
+        text: Bridge.schedule-error;
+    }
+    Footer {
+        ActionButton {
+            text: "Annuler";
+            kind: "ghost";
+            clicked => {
+                Bridge.close-schedule-editor();
+            }
+        }
+        ActionButton {
+            text: "Enregistrer";
+            kind: "primary";
+            clicked => {
+                Bridge.save-schedule();
+            }
+        }
+    }
+}
+
+// Question de la programmation (démarrage manqué, lancement à la main
+// pendant un créneau, information), au-dessus de tout, avec son compte à
+// rebours.
+export component SchedulePrompt inherits Sheet {
+    title: Bridge.prompt-title;
+    sheet-width: 500px;
+    close => {
+        if Bridge.prompt-decline != "" {
+            Bridge.prompt-declined();
+        } else {
+            Bridge.prompt-accepted();
+        }
+    }
+
+    Text {
+        text: Bridge.prompt-text;
+        color: Theme.text-muted;
+        wrap: word-wrap;
+    }
+    if Bridge.prompt-countdown != "": HorizontalLayout {
+        spacing: 8px;
+        Image {
+            source: @image-url("icons/clock.svg");
+            width: 14px;
+            height: 14px;
+            y: (parent.height - self.height) / 2;
+            colorize: Theme.accent;
+        }
+        Text {
+            horizontal-stretch: 1;
+            text: Bridge.prompt-countdown;
+            color: Theme.accent;
+            font-weight: 600;
+            wrap: word-wrap;
+        }
+    }
+    Footer {
+        if Bridge.prompt-decline != "": ActionButton {
+            text: Bridge.prompt-decline;
+            kind: "ghost";
+            clicked => {
+                Bridge.prompt-declined();
+            }
+        }
+        ActionButton {
+            text: Bridge.prompt-accept;
+            kind: "primary";
+            clicked => {
+                Bridge.prompt-accepted();
+            }
         }
     }
 }
