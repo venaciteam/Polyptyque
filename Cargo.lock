@@ -3679,7 +3679,7 @@ dependencies = [
 
 [[package]]
 name = "polyptyque-app"
-version = "1.0.0-beta.2"
+version = "1.0.0-beta.3"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3698,7 +3698,7 @@ dependencies = [
 
 [[package]]
 name = "polyptyque-cli"
-version = "1.0.0-beta.2"
+version = "1.0.0-beta.3"
 dependencies = [
  "anyhow",
  "console",
@@ -3714,7 +3714,7 @@ dependencies = [
 
 [[package]]
 name = "polyptyque-core"
-version = "1.0.0-beta.2"
+version = "1.0.0-beta.3"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3726,7 +3726,7 @@ dependencies = [
 
 [[package]]
 name = "polyptyque-engine"
-version = "1.0.0-beta.2"
+version = "1.0.0-beta.3"
 dependencies = [
  "anyhow",
  "crossbeam-channel",
@@ -3736,7 +3736,7 @@ dependencies = [
 
 [[package]]
 name = "polyptyque-windows"
-version = "1.0.0-beta.2"
+version = "1.0.0-beta.3"
 dependencies = [
  "anyhow",
  "log",

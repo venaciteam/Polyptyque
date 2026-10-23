@@ -712,6 +712,7 @@ Seule une implémentation de `Platform` est à écrire pour chaque système (`po
 | 2026-10-23 | Pendant l'attente d'un créneau : veille et extinction de l'écran empêchées, comme pendant l'enregistrement (plutôt que la veille seule) |
 | 2026-10-23 | Lancement au démarrage de Windows : option, Polyptyque réduit et sans ouvrir les fenêtres de la scène ; quitter avec une programmation active demande confirmation |
 | 2026-10-23 | Chevauchements de programmations refusés (créneaux bout à bout acceptés) ; heure inexistante décalée de la durée du saut, heure double prise à sa première occurrence (RFC 5545) ; démarrage direct jusqu'à 30 s de retard |
+| 2026-10-23 | Publication de la 1.0.0-beta.3 (préversion) : programmation des enregistrements, lancement au démarrage de Windows |
 
 ---
 
