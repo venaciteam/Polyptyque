@@ -414,6 +414,14 @@ component ScenesPanel inherits Panel {
             }
         }
         IconButton {
+            icon: @image-url("icons/duplicate.svg");
+            label: "Dupliquer la scène";
+            enabled: !Bridge.recording;
+            clicked => {
+                Bridge.request-duplicate-scene();
+            }
+        }
+        IconButton {
             icon: @image-url("icons/trash.svg");
             label: "Supprimer la scène";
             enabled: !Bridge.recording && Bridge.scenes.length > 1;
@@ -425,18 +433,71 @@ component ScenesPanel inherits Panel {
     }
 }
 
+// Ligne de la liste des sources, avec son menu (clic droit).
+component SourceRow inherits Rectangle {
+    in property <SourceItem> source;
+    in property <int> index;
+
+    height: 38px;
+
+    menu := ContextMenuArea {
+        Menu {
+            MenuItem {
+                title: "Copier (Ctrl+C)";
+                activated => {
+                    Bridge.copy-source();
+                }
+            }
+            MenuItem {
+                title: "Coller (Ctrl+V)";
+                enabled: Bridge.can-paste && !Bridge.recording;
+                activated => {
+                    Bridge.paste-source();
+                }
+            }
+        }
+    }
+    // Au-dessus du menu : la ligne reçoit aussi le clic droit, qui la
+    // sélectionne avant d'ouvrir le menu.
+    ListRow {
+        width: parent.width;
+        text: root.source.name;
+        detail: root.source.kind;
+        icon: root.source.browser ? @image-url("icons/globe.svg") : @image-url("icons/window.svg");
+        has-icon: true;
+        selected: root.index == Bridge.selected-source;
+        clicked => {
+            Bridge.selected-source = root.index;
+        }
+        right-clicked(x, y) => {
+            Bridge.selected-source = root.index;
+            menu.show({ x: x, y: y });
+        }
+    }
+}
+
 component SourcesPanel inherits Panel {
     title: "SOURCES";
-    ListView {
+    Rectangle {
         vertical-stretch: 1;
-        for source[index] in Bridge.sources: ListRow {
-            text: source.name;
-            detail: source.kind;
-            icon: source.browser ? @image-url("icons/globe.svg") : @image-url("icons/window.svg");
-            has-icon: true;
-            selected: index == Bridge.selected-source;
-            clicked => {
-                Bridge.selected-source = index;
+        // Clic droit dans le vide de la liste : coller.
+        ContextMenuArea {
+            Menu {
+                MenuItem {
+                    title: "Coller (Ctrl+V)";
+                    enabled: Bridge.can-paste && !Bridge.recording;
+                    activated => {
+                        Bridge.paste-source();
+                    }
+                }
+            }
+        }
+        ListView {
+            width: parent.width;
+            height: parent.height;
+            for source[index] in Bridge.sources: SourceRow {
+                source: source;
+                index: index;
             }
         }
     }
@@ -589,25 +650,52 @@ export component AppWindow inherits Window {
     min-height: 640px;
     background: Theme.background;
     default-font-size: Theme.font-normal;
+    forward-focus: shortcuts;
 
-    VerticalLayout {
-        padding: 16px;
-        spacing: Theme.gap;
-        TopBar { }
-        PreviewGrid {
-            vertical-stretch: 1;
+    // Plus aucune fenêtre modale : les raccourcis de la fenêtre principale
+    // reprennent la main, sans avoir à recliquer.
+    property <bool> modal-open: Bridge.sheet != "" || Bridge.prompt-kind != "";
+    changed modal-open => {
+        if !self.modal-open {
+            shortcuts.focus();
         }
-        HorizontalLayout {
-            height: 236px;
+    }
+
+    // Raccourcis de la fenêtre principale, hors fenêtres modales (leurs
+    // champs de texte gardent leur propre Ctrl+C / Ctrl+V).
+    shortcuts := FocusScope {
+        KeyBinding {
+            keys: @keys(Control + C);
+            activated => {
+                Bridge.copy-source();
+            }
+        }
+        KeyBinding {
+            keys: @keys(Control + V);
+            activated => {
+                Bridge.paste-source();
+            }
+        }
+
+        VerticalLayout {
+            padding: 16px;
             spacing: Theme.gap;
-            ScenesPanel {
-                width: 230px;
+            TopBar { }
+            PreviewGrid {
+                vertical-stretch: 1;
             }
-            SourcesPanel {
-                horizontal-stretch: 1;
-            }
-            ControlsPanel {
-                width: 300px;
+            HorizontalLayout {
+                height: 236px;
+                spacing: Theme.gap;
+                ScenesPanel {
+                    width: 230px;
+                }
+                SourcesPanel {
+                    horizontal-stretch: 1;
+                }
+                ControlsPanel {
+                    width: 300px;
+                }
             }
         }
     }
@@ -624,7 +712,7 @@ export component AppWindow inherits Window {
         width: root.width;
         height: root.height;
     }
-    if Bridge.sheet == "scene-new" || Bridge.sheet == "scene-rename": SceneNameSheet {
+    if Bridge.sheet == "scene-new" || Bridge.sheet == "scene-rename" || Bridge.sheet == "scene-duplicate": SceneNameSheet {
         width: root.width;
         height: root.height;
     }

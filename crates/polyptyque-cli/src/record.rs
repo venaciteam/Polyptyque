@@ -30,8 +30,9 @@ const BACKLOG_WARNING_SECONDS: f32 = 2.0;
 pub fn run(platform: &Arc<dyn Platform>, config: &Config) -> Result<()> {
     let theme = ui::theme();
     let scene = config.active_scene().clone();
+    let sources = config.active_sources();
     let settings = config.settings.clone();
-    if scene.sources.is_empty() {
+    if sources.is_empty() {
         ui::warning("Ajoute d'abord au moins une source à cette scène.");
         ui::pause();
         return Ok(());
@@ -51,7 +52,7 @@ pub fn run(platform: &Arc<dyn Platform>, config: &Config) -> Result<()> {
     };
     ui::success(&format!("Encodeur : {}", encoder.label()));
 
-    let missing = prepare_windows(platform.as_ref(), &scene.sources);
+    let missing = prepare_windows(platform.as_ref(), &sources);
     if !missing.is_empty() {
         ui::warning(&format!(
             "Fenêtre(s) introuvable(s) : {}. Elles seront rattachées dès qu'elles apparaîtront (image noire en attendant).",
@@ -59,14 +60,14 @@ pub fn run(platform: &Arc<dyn Platform>, config: &Config) -> Result<()> {
         ));
     }
 
-    let per_hour = bytes_per_hour(video.bitrate_kbps, settings.audio.bitrate_kbps) * scene.sources.len() as u64;
+    let per_hour = bytes_per_hour(video.bitrate_kbps, settings.audio.bitrate_kbps) * sources.len() as u64;
     if let Some(free) = platform.free_disk_space(&settings.output_dir) {
         let autonomy = free as f64 / per_hour as f64 * 3600.0;
         println!(
             "Espace libre : {} · environ {} d'enregistrement pour {} source(s).",
             ui::bytes(free),
             ui::hours(autonomy),
-            scene.sources.len()
+            sources.len()
         );
         if free < per_hour {
             ui::warning("Moins d'une heure d'enregistrement possible sur ce disque.");
@@ -83,7 +84,7 @@ pub fn run(platform: &Arc<dyn Platform>, config: &Config) -> Result<()> {
     RECORDING.store(true, Ordering::SeqCst);
     let plan = SessionPlan {
         scene_name: scene.name.clone(),
-        sources: scene.sources.clone(),
+        sources: sources.clone(),
         settings: settings.clone(),
         encoder,
         ffmpeg,
@@ -109,7 +110,7 @@ pub fn run(platform: &Arc<dyn Platform>, config: &Config) -> Result<()> {
         video.fps,
         ui::thousands(video.bitrate_kbps as u64)
     );
-    let session = monitor(session, &header, &scene.sources);
+    let session = monitor(session, &header, &sources);
 
     println!("\nArrêt en cours : les fichiers sont finalisés…");
     let summaries = session.stop();

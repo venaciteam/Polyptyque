@@ -172,6 +172,8 @@ export component ListRow inherits Rectangle {
     in property <bool> selected;
     in property <bool> enabled: true;
     callback clicked;
+    // Clic droit, à cette position dans la ligne.
+    callback right-clicked(length, length);
 
     height: 38px;
     border-radius: Theme.radius-small;
@@ -219,6 +221,11 @@ export component ListRow inherits Rectangle {
         mouse-cursor: root.enabled ? pointer : default;
         clicked => {
             root.clicked();
+        }
+        pointer-event(event) => {
+            if event.button == PointerEventButton.right && event.kind == PointerEventKind.down {
+                root.right-clicked(self.mouse-x, self.mouse-y);
+            }
         }
     }
 }

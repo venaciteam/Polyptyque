@@ -144,7 +144,7 @@ export component AddApplicationSheet inherits Sheet {
 }
 
 export component SceneNameSheet inherits Sheet {
-    title: Bridge.sheet == "scene-new" ? "Nouvelle scène" : "Renommer la scène";
+    title: Bridge.sheet == "scene-new" ? "Nouvelle scène" : Bridge.sheet == "scene-duplicate" ? "Dupliquer la scène" : "Renommer la scène";
     sheet-width: 440px;
     close => {
         Bridge.close-sheet();
@@ -162,6 +162,9 @@ export component SceneNameSheet inherits Sheet {
             }
         }
     }
+    if Bridge.sheet == "scene-duplicate": Note {
+        text: "La nouvelle scène reprend les sources de « \{Bridge.scene-name} », partagées : ce sont les mêmes (même fenêtre, mêmes connexions), pas des copies. Retirer une source d'une scène ne la retire pas de l'autre.";
+    }
     Footer {
         ActionButton {
             text: "Annuler";
@@ -171,7 +174,7 @@ export component SceneNameSheet inherits Sheet {
             }
         }
         ActionButton {
-            text: Bridge.sheet == "scene-new" ? "Créer" : "Renommer";
+            text: Bridge.sheet == "scene-new" ? "Créer" : Bridge.sheet == "scene-duplicate" ? "Dupliquer" : "Renommer";
             kind: "primary";
             enabled: Bridge.scene-name-input != "";
             clicked => {

@@ -105,11 +105,11 @@ fn print_header(config: &Config) {
         ))
         .dim()
     );
-    let scene = config.active_scene();
-    if scene.sources.is_empty() {
+    let sources = config.active_sources();
+    if sources.is_empty() {
         println!("{}", style("Aucune source pour l'instant.").dim());
     } else {
-        for (i, source) in scene.sources.iter().enumerate() {
+        for (i, source) in sources.iter().enumerate() {
             let kind = match &source.kind {
                 SourceKind::Browser { browser, .. } => format!("navigateur {}", browser.name),
                 SourceKind::Application { exe_path, .. } => format!(

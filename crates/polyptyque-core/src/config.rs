@@ -1,5 +1,6 @@
 //! Configuration persistante : scènes, sources et réglages.
 
+use std::collections::HashSet;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -16,7 +17,9 @@ use crate::platform::{BrowserInstall, WindowInfo};
 use crate::schedule::Schedule;
 use crate::storage;
 
-pub const CONFIG_VERSION: u32 = 1;
+/// 2 : sources rangées à part, les scènes n'en gardent que les identifiants
+/// (1 : chaque scène contenait ses sources).
+pub const CONFIG_VERSION: u32 = 2;
 
 /// Fréquence d'échantillonnage utilisée pour tout l'audio.
 pub const SAMPLE_RATE: u32 = 48_000;
@@ -30,6 +33,10 @@ pub struct Config {
     pub active_scene: String,
     pub settings: Settings,
     pub scenes: Vec<Scene>,
+    /// Toutes les sources, une seule fois chacune. Les scènes n'en gardent
+    /// que les identifiants : une même source (même fenêtre, même profil de
+    /// navigateur) peut ainsi figurer dans plusieurs scènes.
+    pub sources: Vec<Source>,
     /// Programmations des enregistrements (chacune lance une scène).
     pub schedules: Vec<Schedule>,
 }
@@ -42,6 +49,7 @@ impl Default for Config {
             active_scene: scene.id.clone(),
             settings: Settings::default(),
             scenes: vec![scene],
+            sources: Vec::new(),
             schedules: Vec::new(),
         }
     }
@@ -94,16 +102,30 @@ impl Config {
     }
 
     /// Garantit les invariants : au moins une scène, une scène active valide,
-    /// des programmations qui lancent des scènes existantes (celles d'une
+    /// chaque source une seule fois, et au plus une fois par scène, des
+    /// programmations qui lancent des scènes existantes (celles d'une
     /// scène supprimée disparaissent avec elle), des réglages dans les
     /// bornes.
     pub fn normalize(&mut self) {
+        self.version = CONFIG_VERSION;
         if self.scenes.is_empty() {
             self.scenes.push(Scene::new("Scène principale"));
         }
         if !self.scenes.iter().any(|s| s.id == self.active_scene) {
             self.active_scene = self.scenes[0].id.clone();
         }
+        let mut known = HashSet::new();
+        self.sources.retain(|source| known.insert(source.id.clone()));
+        // Deux fois la même source dans une scène enregistrerait deux fois le
+        // même programme, avec le même son.
+        for scene in &mut self.scenes {
+            let mut seen = HashSet::new();
+            scene.source_ids.retain(|id| known.contains(id) && seen.insert(id.clone()));
+        }
+        // Une source qui n'est plus dans aucune scène disparaît ; son profil
+        // de navigateur reste sur le disque.
+        let used: HashSet<&String> = self.scenes.iter().flat_map(|s| &s.source_ids).collect();
+        self.sources.retain(|source| used.contains(&source.id));
         let scenes = &self.scenes;
         self.schedules.retain(|schedule| scenes.iter().any(|scene| scene.id == schedule.scene_id));
         self.settings.video.normalize();
@@ -116,7 +138,7 @@ impl Config {
     /// Vrai si le navigateur d'une source n'est plus à l'emplacement
     /// enregistré (autre PC, navigateur réinstallé ailleurs).
     pub fn has_missing_browser(&self) -> bool {
-        self.scenes.iter().flat_map(|s| &s.sources).any(|source| match &source.kind {
+        self.sources.iter().any(|source| match &source.kind {
             SourceKind::Browser { browser, .. } => !browser.exe_path.exists(),
             SourceKind::Application { .. } => false,
         })
@@ -128,7 +150,7 @@ impl Config {
     /// installé ailleurs. Renvoie vrai si quelque chose a changé.
     pub fn relocate(&mut self, profiles_root: &Path, browsers: &[BrowserInstall]) -> bool {
         let mut changed = false;
-        for source in self.scenes.iter_mut().flat_map(|s| s.sources.iter_mut()) {
+        for source in &mut self.sources {
             let SourceKind::Browser { profile_dir, browser, .. } = &mut source.kind else {
                 continue;
             };
@@ -165,6 +187,86 @@ impl Config {
         let index = self.scenes.iter().position(|s| s.id == self.active_scene).unwrap_or(0);
         &mut self.scenes[index]
     }
+
+    pub fn source(&self, id: &str) -> Option<&Source> {
+        self.sources.iter().find(|s| s.id == id)
+    }
+
+    /// Sources d'une scène, dans son ordre.
+    pub fn scene_sources(&self, scene: &Scene) -> Vec<Source> {
+        scene.source_ids.iter().filter_map(|id| self.source(id)).cloned().collect()
+    }
+
+    /// Sources de la scène active, dans son ordre.
+    pub fn active_sources(&self) -> Vec<Source> {
+        self.scene_sources(self.active_scene())
+    }
+
+    /// Scènes qui contiennent cette source.
+    pub fn scenes_with(&self, source_id: &str) -> Vec<&Scene> {
+        self.scenes.iter().filter(|s| s.contains(source_id)).collect()
+    }
+
+    /// Ajoute une nouvelle source à la fin de la scène active.
+    pub fn add_source(&mut self, source: Source) {
+        self.active_scene_mut().source_ids.push(source.id.clone());
+        self.sources.push(source);
+    }
+
+    /// Colle une source existante à la fin de la scène active : c'est la
+    /// même source (même fenêtre, même profil), pas une copie.
+    pub fn paste_source(&mut self, source_id: &str) -> Result<(), PasteError> {
+        if self.source(source_id).is_none() {
+            return Err(PasteError::Missing);
+        }
+        if self.active_scene().contains(source_id) {
+            return Err(PasteError::AlreadyInScene);
+        }
+        self.active_scene_mut().source_ids.push(source_id.to_string());
+        Ok(())
+    }
+
+    /// Retire une source de la scène active seulement. Si elle n'est plus
+    /// dans aucune scène, elle disparaît (son profil reste sur le disque).
+    pub fn remove_source(&mut self, source_id: &str) {
+        self.active_scene_mut().source_ids.retain(|id| id != source_id);
+        self.normalize();
+    }
+
+    /// Nouvelle scène avec les mêmes sources (par référence, dans le même
+    /// ordre), qui devient la scène active. Ses programmations ne sont pas
+    /// reprises. Renvoie l'identifiant de la nouvelle scène.
+    pub fn duplicate_scene(&mut self, scene_id: &str, name: &str) -> Option<String> {
+        let source_ids = self.scene(scene_id)?.source_ids.clone();
+        let scene = Scene { source_ids, ..Scene::new(name) };
+        let id = scene.id.clone();
+        self.scenes.push(scene);
+        self.active_scene = id.clone();
+        Some(id)
+    }
+
+    /// Sources de cette scène qui ne sont dans aucune autre : elles
+    /// disparaîtraient avec elle.
+    pub fn sources_only_in(&self, scene_id: &str) -> Vec<&Source> {
+        let Some(scene) = self.scene(scene_id) else {
+            return Vec::new();
+        };
+        scene
+            .source_ids
+            .iter()
+            .filter(|id| !self.scenes.iter().any(|other| other.id != scene_id && other.contains(id)))
+            .filter_map(|id| self.source(id))
+            .collect()
+    }
+}
+
+/// Collage d'une source refusé.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PasteError {
+    /// La source copiée a été supprimée entre-temps.
+    Missing,
+    /// La scène la contient déjà.
+    AlreadyInScene,
 }
 
 /// Jours de sauvegarde quotidienne des réglages conservés.
@@ -176,9 +278,38 @@ fn parse(text: &str) -> Result<Config> {
     if text.trim().is_empty() {
         anyhow::bail!("fichier vide");
     }
-    let mut config: Config = toml::from_str(text)?;
+    let mut table: toml::Table = toml::from_str(text)?;
+    lift_scene_sources(&mut table);
+    let mut config: Config = table.try_into()?;
     config.normalize();
     Ok(config)
+}
+
+/// Version 1 : chaque scène contenait ses sources en entier. Elles passent
+/// dans la liste commune (`[[sources]]`), et la scène n'en garde que les
+/// identifiants, dans le même ordre. Sans effet sur un fichier récent.
+fn lift_scene_sources(table: &mut toml::Table) {
+    let mut lifted = Vec::new();
+    if let Some(toml::Value::Array(scenes)) = table.get_mut("scenes") {
+        for scene in scenes.iter_mut().filter_map(toml::Value::as_table_mut) {
+            let Some(toml::Value::Array(entries)) = scene.get_mut("sources") else {
+                continue;
+            };
+            for entry in entries.iter_mut() {
+                let id = entry.as_table().and_then(|source| source.get("id")).and_then(toml::Value::as_str);
+                if let Some(id) = id.map(str::to_string) {
+                    lifted.push(std::mem::replace(entry, toml::Value::String(id)));
+                }
+            }
+        }
+    }
+    if lifted.is_empty() {
+        return;
+    }
+    match table.entry("sources").or_insert_with(|| toml::Value::Array(Vec::new())) {
+        toml::Value::Array(sources) => sources.extend(lifted),
+        other => *other = toml::Value::Array(lifted),
+    }
 }
 
 fn backup_dir(path: &Path) -> PathBuf {
@@ -222,13 +353,19 @@ fn backup_daily(path: &Path, text: &str) {
 pub struct Scene {
     pub id: String,
     pub name: String,
-    #[serde(default)]
-    pub sources: Vec<Source>,
+    /// Identifiants des sources de la scène, dans leur ordre (les sources
+    /// elles-mêmes sont dans `Config::sources`).
+    #[serde(default, rename = "sources")]
+    pub source_ids: Vec<String>,
 }
 
 impl Scene {
     pub fn new(name: &str) -> Self {
-        Self { id: new_id(), name: name.to_string(), sources: Vec::new() }
+        Self { id: new_id(), name: name.to_string(), source_ids: Vec::new() }
+    }
+
+    pub fn contains(&self, source_id: &str) -> bool {
+        self.source_ids.iter().any(|id| id == source_id)
     }
 }
 
@@ -575,7 +712,7 @@ mod tests {
 
     fn sample() -> Config {
         let mut config = Config::default();
-        config.active_scene_mut().sources.push(Source {
+        config.add_source(Source {
             id: new_id(),
             name: "Firefox 1".into(),
             capture_cursor: true,
@@ -590,7 +727,7 @@ mod tests {
                 },
             },
         });
-        config.active_scene_mut().sources.push(Source {
+        config.add_source(Source {
             id: new_id(),
             name: "Discord".into(),
             capture_cursor: false,
@@ -609,11 +746,12 @@ mod tests {
     fn round_trip_toml() {
         let config = sample();
         let text = toml::to_string_pretty(&config).unwrap();
-        let back: Config = toml::from_str(&text).unwrap();
+        let back = parse(&text).unwrap();
         assert_eq!(back.scenes.len(), 1);
-        assert_eq!(back.active_scene().sources.len(), 2);
-        assert_eq!(back.active_scene().sources[0].name, "Firefox 1");
-        assert!(matches!(back.active_scene().sources[1].kind, SourceKind::Application { .. }));
+        let sources = back.active_sources();
+        assert_eq!(sources.len(), 2);
+        assert_eq!(sources[0].name, "Firefox 1");
+        assert!(matches!(sources[1].kind, SourceKind::Application { .. }));
     }
 
     #[test]
@@ -624,7 +762,7 @@ mod tests {
         config.save(&path).unwrap();
         let (loaded, warning) = Config::load_or_default(&path);
         assert!(warning.is_none());
-        assert_eq!(loaded.active_scene().sources.len(), 2);
+        assert_eq!(loaded.active_sources().len(), 2);
         fs::remove_dir_all(dir).unwrap();
     }
 
@@ -655,7 +793,7 @@ mod tests {
         fs::write(&path, "").unwrap();
         let (loaded, warning) = Config::load_or_default(&path);
         assert!(warning.unwrap().contains("restaurée"));
-        assert_eq!(loaded.active_scene().sources.len(), 2);
+        assert_eq!(loaded.active_sources().len(), 2);
         // Le fichier restauré est réécrit.
         assert!(!fs::read_to_string(&path).unwrap().trim().is_empty());
         fs::remove_dir_all(dir).unwrap();
@@ -691,7 +829,7 @@ mod tests {
         let mut config = Config::default();
         let source = Source::browser("Concert", firefox, None, old_root);
         let id = source.id.clone();
-        config.active_scene_mut().sources.push(source);
+        config.add_source(source);
         assert!(config.has_missing_browser());
         let installed = vec![BrowserInstall {
             name: "Firefox".into(),
@@ -700,7 +838,7 @@ mod tests {
         }];
         let profiles = dir.join("profils");
         assert!(config.relocate(&profiles, &installed));
-        let SourceKind::Browser { profile_dir, browser, .. } = &config.active_scene().sources[0].kind else {
+        let SourceKind::Browser { profile_dir, browser, .. } = &config.sources[0].kind else {
             panic!("source navigateur attendue");
         };
         assert_eq!(profile_dir, &profiles.join(&id));
@@ -793,6 +931,152 @@ mod tests {
         assert_eq!(settings.update_channel("1.0.0-beta.2"), UpdateChannel::Stable);
         let back: Settings = toml::from_str(&toml::to_string(&settings).unwrap()).unwrap();
         assert_eq!(back.update_channel, Some(UpdateChannel::Stable));
+    }
+
+    /// Fichier écrit par la version 1 (sources rangées dans les scènes),
+    /// avec la même source navigateur dans deux scènes.
+    const VERSION_1: &str = r#"
+version = 1
+active_scene = "s2"
+
+[[scenes]]
+id = "s1"
+name = "Podcast"
+
+[[scenes.sources]]
+id = "a"
+name = "Concert"
+capture_cursor = true
+relaunch = true
+
+[scenes.sources.kind]
+type = "browser"
+profile_dir = 'C:\Polyptyque\profils\a'
+
+[scenes.sources.kind.browser]
+name = "Firefox"
+exe_path = 'C:\Program Files\Mozilla Firefox\firefox.exe'
+family = "gecko"
+
+[[scenes.sources]]
+id = "b"
+name = "Discord"
+capture_cursor = false
+relaunch = false
+
+[scenes.sources.kind]
+type = "application"
+exe_path = 'C:\Discord\Discord.exe'
+window_class = "Chrome_WidgetWin_1"
+window_title = "Discord"
+
+[[scenes]]
+id = "s2"
+name = "Archive"
+"#;
+
+    #[test]
+    fn version_1_sources_move_out_of_their_scenes() {
+        let config = parse(VERSION_1).unwrap();
+        assert_eq!(config.version, CONFIG_VERSION);
+        assert_eq!(config.active_scene, "s2");
+        let ids: Vec<&str> = config.sources.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, ["a", "b"]);
+        assert_eq!(config.scenes[0].source_ids, ["a", "b"]);
+        assert!(config.scenes[1].source_ids.is_empty());
+        let SourceKind::Browser { profile_dir, .. } = &config.sources[0].kind else {
+            panic!("source navigateur attendue");
+        };
+        assert_eq!(profile_dir, Path::new(r"C:\Polyptyque\profils\a"));
+        assert!(!config.sources[1].capture_cursor);
+        // Réécrit au nouveau format, relu à l'identique.
+        let text = toml::to_string_pretty(&config).unwrap();
+        assert!(text.contains("version = 2"));
+        let back = parse(&text).unwrap();
+        assert_eq!(back.scenes[0].source_ids, ["a", "b"]);
+        assert_eq!(back.sources.len(), 2);
+    }
+
+    #[test]
+    fn a_pasted_source_is_the_same_source() {
+        let mut config = sample();
+        let podcast = config.active_scene.clone();
+        let firefox = config.sources[0].id.clone();
+        config.scenes.push(Scene::new("Archive"));
+        config.active_scene = config.scenes[1].id.clone();
+        config.paste_source(&firefox).unwrap();
+        config.normalize();
+        // Une seule source, dans les deux scènes.
+        assert_eq!(config.sources.len(), 2);
+        assert_eq!(config.active_sources()[0].id, firefox);
+        assert_eq!(config.scenes_with(&firefox).len(), 2);
+        // La renommer dans une scène la renomme partout.
+        config.sources[0].name = "Concert".into();
+        assert_eq!(config.scene_sources(config.scene(&podcast).unwrap())[0].name, "Concert");
+        // Jamais deux fois dans la même scène.
+        assert_eq!(config.paste_source(&firefox), Err(PasteError::AlreadyInScene));
+        assert_eq!(config.paste_source("inconnue"), Err(PasteError::Missing));
+        assert_eq!(config.active_scene().source_ids.len(), 1);
+    }
+
+    #[test]
+    fn removing_a_source_only_affects_the_current_scene() {
+        let mut config = sample();
+        let podcast = config.active_scene.clone();
+        let firefox = config.sources[0].id.clone();
+        let archive = config.duplicate_scene(&podcast, "Archive").unwrap();
+        assert_eq!(config.active_scene, archive);
+        config.remove_source(&firefox);
+        assert_eq!(config.active_scene().source_ids.len(), 1);
+        assert!(config.scene(&podcast).unwrap().contains(&firefox));
+        assert!(config.source(&firefox).is_some());
+        // Retirée de la dernière scène qui l'avait : elle disparaît.
+        config.active_scene = podcast;
+        config.remove_source(&firefox);
+        assert!(config.source(&firefox).is_none());
+        assert_eq!(config.sources.len(), 1);
+    }
+
+    #[test]
+    fn a_duplicated_scene_shares_its_sources() {
+        use crate::schedule::{Repeat, TimeOfDay};
+        let mut config = sample();
+        let podcast = config.active_scene.clone();
+        let start = TimeOfDay::new(21, 0).unwrap();
+        let end = TimeOfDay::new(22, 0).unwrap();
+        config.schedules.push(Schedule::new(&podcast, start, end, Repeat::Weekly { days: vec![1] }));
+        let copy = config.duplicate_scene(&podcast, "Podcast (copie)").unwrap();
+        config.normalize();
+        assert_eq!(config.scenes.len(), 2);
+        assert_eq!(config.sources.len(), 2);
+        assert_eq!(config.scene(&copy).unwrap().source_ids, config.scene(&podcast).unwrap().source_ids);
+        assert_eq!(config.schedules.len(), 1);
+        assert!(config.duplicate_scene("inconnue", "X").is_none());
+        // Supprimer l'original garde les sources, toujours dans la copie.
+        assert!(config.sources_only_in(&podcast).is_empty());
+        config.scenes.retain(|s| s.id != podcast);
+        config.normalize();
+        assert_eq!(config.active_sources().len(), 2);
+        // Supprimer la dernière scène qui les a : elles disparaissent.
+        assert_eq!(config.sources_only_in(&copy).len(), 2);
+        config.scenes = vec![Scene::new("Vide")];
+        config.normalize();
+        assert!(config.sources.is_empty());
+    }
+
+    #[test]
+    fn normalize_drops_unknown_and_repeated_sources() {
+        let mut config = sample();
+        let firefox = config.sources[0].id.clone();
+        let twin = config.sources[0].clone();
+        config.sources.push(twin);
+        let scene = config.active_scene_mut();
+        scene.source_ids.push(firefox.clone());
+        scene.source_ids.push("inconnue".into());
+        config.normalize();
+        assert_eq!(config.sources.len(), 2);
+        assert_eq!(config.active_scene().source_ids.len(), 2);
+        assert_eq!(config.active_scene().source_ids[0], firefox);
     }
 
     #[test]

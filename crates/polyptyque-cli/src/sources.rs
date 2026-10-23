@@ -73,7 +73,7 @@ pub fn add_browser(platform: &dyn Platform, config: &mut Config) -> Result<()> {
         return Ok(());
     };
 
-    let count = config.active_scene().sources.len() + 1;
+    let count = config.active_scene().source_ids.len() + 1;
     let name: String = Input::with_theme(&theme)
         .with_prompt("Nom de la source (utilisé dans le nom du fichier)")
         .default(format!("{} {count}", short_name(&browser.name)))
@@ -85,7 +85,7 @@ pub fn add_browser(platform: &dyn Platform, config: &mut Config) -> Result<()> {
 
     let url = Some(url.as_str()).filter(|u| !u.trim().is_empty());
     let source = Source::browser(&name, browser, url, &paths::profiles_dir());
-    config.active_scene_mut().sources.push(source.clone());
+    config.add_source(source.clone());
     ui::success(&format!("Source « {} » ajoutée avec son propre profil de navigateur.", source.name));
     println!(
         "{}",
@@ -159,7 +159,7 @@ pub fn add_application(platform: &dyn Platform, config: &mut Config) -> Result<(
 
         let source = Source::application(&name, window, relaunch, capture_cursor);
         ui::success(&format!("Source « {} » ajoutée.", source.name));
-        config.active_scene_mut().sources.push(source);
+        config.add_source(source);
         ui::pause();
         return Ok(());
     }
@@ -168,7 +168,7 @@ pub fn add_application(platform: &dyn Platform, config: &mut Config) -> Result<(
 pub fn open_browsers(platform: &dyn Platform, config: &Config) -> Result<()> {
     let windows = platform.list_windows();
     let mut any = false;
-    for source in &config.active_scene().sources {
+    for source in &config.active_sources() {
         if !matches!(source.kind, SourceKind::Browser { .. }) {
             continue;
         }
@@ -191,29 +191,33 @@ pub fn open_browsers(platform: &dyn Platform, config: &Config) -> Result<()> {
 
 pub fn remove(config: &mut Config) -> Result<()> {
     let theme = ui::theme();
-    let scene = config.active_scene();
-    if scene.sources.is_empty() {
+    let sources = config.active_sources();
+    if sources.is_empty() {
         ui::warning("Aucune source à supprimer.");
         ui::pause();
         return Ok(());
     }
-    let mut items: Vec<String> = scene.sources.iter().map(|s| s.name.clone()).collect();
+    let mut items: Vec<String> = sources.iter().map(|s| s.name.clone()).collect();
     items.push("Annuler".into());
     let choice = Select::with_theme(&theme)
         .with_prompt("Quelle source supprimer ?")
         .items(&items)
         .default(items.len() - 1)
         .interact()?;
-    if choice >= scene.sources.len() {
+    if choice >= sources.len() {
         return Ok(());
     }
-    let source = scene.sources[choice].clone();
+    let source = sources[choice].clone();
+    // Partagée avec une autre scène : elle n'est retirée que de celle-ci, et
+    // son profil sert encore.
+    let shared = config.scenes_with(&source.id).len() > 1;
     if !Confirm::with_theme(&theme).with_prompt(format!("Supprimer « {} » ?", source.name)).default(false).interact()?
     {
         return Ok(());
     }
     if let SourceKind::Browser { profile_dir, .. } = &source.kind {
-        if profile_dir.exists()
+        if !shared
+            && profile_dir.exists()
             && Confirm::with_theme(&theme)
                 .with_prompt("Supprimer aussi son profil de navigateur (connexions, cookies, onglets) ?")
                 .default(false)
@@ -225,7 +229,7 @@ pub fn remove(config: &mut Config) -> Result<()> {
             }
         }
     }
-    config.active_scene_mut().sources.remove(choice);
+    config.remove_source(&source.id);
     Ok(())
 }
 

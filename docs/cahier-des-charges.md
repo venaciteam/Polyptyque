@@ -124,7 +124,7 @@ graph TD
 | Concept | Définition |
 |---|---|
 | **Scène** | Groupe nommé de sources, correspondant à un usage (« Podcast », « Archive »…). Une seule scène est active à la fois. |
-| **Source** | Une fenêtre capturée avec son son isolé. Produit un fichier. |
+| **Source** | Une fenêtre capturée avec son son isolé. Produit un fichier. Une même source peut figurer dans plusieurs scènes. |
 | **Source navigateur** | Navigateur lancé par Polyptyque avec un profil qui lui est dédié. |
 | **Source application** | Toute autre fenêtre : Discord, jeu, Tor Browser, logiciel quelconque. |
 | **Profil dédié** | Dossier de profil de navigateur propre à une source. Il conserve connexions, cookies et onglets. |
@@ -140,9 +140,22 @@ graph TD
 - Une scène contient une liste ordonnée de sources.
 - **Verrouillage pendant l'enregistrement** : tant qu'au moins une source enregistre, il est impossible de :
 	- changer de scène ;
-	- ajouter ou supprimer une source ;
+	- ajouter, coller ou supprimer une source ; dupliquer une scène ;
 	- modifier les réglages d'encodage.
 - La scène active à la fermeture est rouverte au lancement suivant.
+
+**Une source dans plusieurs scènes** (copier-coller **par référence**) :
+- **Copier** la source sélectionnée (clic droit > « Copier », ou <kbd>Ctrl</kbd> + <kbd>C</kbd>), choisir une autre scène, puis **coller** (clic droit dans la liste > « Coller », ou <kbd>Ctrl</kbd> + <kbd>V</kbd>) : la source est ajoutée à la fin de la scène en cours.
+- C'est **la même source** dans les deux scènes, pas une copie : même fenêtre, et pour un navigateur même profil, donc mêmes connexions et mêmes onglets. La modifier dans une scène la modifie partout. Seul l'ordre des sources est propre à chaque scène.
+- **Jamais deux fois la même source dans une scène** (même programme, donc même son) : le collage est alors refusé, avec une explication.
+- **Supprimer** une source ne la retire que de la scène en cours ; la confirmation indique les autres scènes où elle reste. Retirée de sa dernière scène, elle disparaît (son profil de navigateur reste sur le disque, comme pour toute suppression). Supprimer une scène supprime les sources qui ne sont dans aucune autre scène.
+- **Dupliquer une scène** (nom proposé : « Podcast (copie) ») : la nouvelle scène reprend les mêmes sources, par référence et dans le même ordre, et devient la scène en cours. Les programmations ne sont pas reprises.
+- Une source partagée l'indique dans la liste des sources (« Navigateur Firefox · 2 scènes »).
+- Copier reste possible pendant un enregistrement (rien ne change) ; coller et dupliquer sont bloqués, comme l'ajout d'une source.
+- Le presse-papiers est interne à Polyptyque : rien n'est copié dans celui de Windows. Les raccourcis agissent dans la fenêtre principale, pas dans les fenêtres de réglages (leurs champs de texte gardent leurs propres raccourcis).
+
+> [!note] Rangement dans les réglages
+> Depuis la version 2 du fichier de réglages, les sources sont rangées une seule fois (`[[sources]]`) et chaque scène ne garde que la liste ordonnée de leurs identifiants. Le dossier de profil (`profils/<identifiant>`) reste donc unique, quel que soit le nombre de scènes. Un fichier de la version 1 (sources rangées dans chaque scène) est converti au chargement, sans rien perdre ; la version précédente reste dans `config.toml.precedent`.
 
 ### Sources navigateur
 
@@ -155,7 +168,7 @@ graph TD
 | Gecko (Firefox) | Firefox, LibreWolf, Waterfox, Zen, Floorp | `-profile "<dossier>" -no-remote` |
 | Chromium | Chrome, Edge, Brave, Vivaldi, Opera | `--user-data-dir="<dossier>"` |
 
-- **Un profil dédié par source**, stocké dans le dossier de données de Polyptyque (`%LOCALAPPDATA%\Polyptyque\profils\<identifiant>`).
+- **Un profil dédié par source**, stocké dans le dossier de données de Polyptyque (`%LOCALAPPDATA%\Polyptyque\profils\<identifiant>`), commun à toutes les scènes où figure la source.
 - **Connexions conservées** : le profil est permanent, l'utilisateur ne se connecte qu'une fois par profil.
 - **Restauration des onglets** : Polyptyque configure le profil pour rouvrir les onglets de la session précédente (Firefox : préférence `browser.startup.page = 3` ; Chromium : option de lancement `--restore-last-session`).
 - **Adresse de départ** optionnelle, utilisée au premier lancement du profil.
@@ -379,7 +392,6 @@ Inspirée d'[[OBS Studio]], volontairement allégée, thème sombre.
 
 > [!todo] Pas encore réalisé (constat du 2026-10-22)
 > Comparaison de ce cahier avec le code, pour ne rien oublier :
-> - duplication d'une scène ;
 > - cadence réelle et durée sur chaque carte ; charge du processeur et de la carte graphique dans la barre d'état ;
 > - fenêtre de paramètres en sections (aujourd'hui : une feuille en deux colonnes « Enregistrement » et « Fichiers et interface ») ;
 > - textes externalisés pour la traduction ; navigation complète au clavier ;
@@ -639,6 +651,13 @@ Seule une implémentation de `Platform` est à écrire pour chaque système (`po
 > - [x] Vérifié en mode démonstration (démarrage manqué, démarrage à l'heure, créneaux bout à bout, arrêt automatique)
 > - [ ] Validation sur la machine de référence, dont session verrouillée et écran éteint ([[protocole-test-programmation]])
 
+> [!todo] Étape 3 quater - Sources partagées entre scènes, écrite le 2026-10-23
+> - [x] Copier-coller d'une source par référence (clic droit, <kbd>Ctrl</kbd> + <kbd>C</kbd> / <kbd>Ctrl</kbd> + <kbd>V</kbd>), refus d'un doublon dans une scène
+> - [x] Suppression limitée à la scène en cours ; duplication d'une scène par référence
+> - [x] Réglages en version 2 (sources rangées à part), conversion automatique de la version 1
+> - [x] Vérifié en mode démonstration (copier, coller, refus, menus, raccourcis, duplication, textes de confirmation)
+> - [ ] Validation sur la machine de référence
+
 > [!todo] Étape 4 - Publication
 > - [ ] Dépôt public, première version publiée
 > - [ ] FFmpeg compilé par le projet (plus léger, signable)
@@ -713,6 +732,7 @@ Seule une implémentation de `Platform` est à écrire pour chaque système (`po
 | 2026-10-23 | Lancement au démarrage de Windows : option, Polyptyque réduit et sans ouvrir les fenêtres de la scène ; quitter avec une programmation active demande confirmation |
 | 2026-10-23 | Chevauchements de programmations refusés (créneaux bout à bout acceptés) ; heure inexistante décalée de la durée du saut, heure double prise à sa première occurrence (RFC 5545) ; démarrage direct jusqu'à 30 s de retard |
 | 2026-10-23 | Publication de la 1.0.0-beta.3 (préversion) : programmation des enregistrements, lancement au démarrage de Windows |
+| 2026-10-23 | Copier-coller d'une source **par référence** (même source, même profil, dans plusieurs scènes), jamais deux fois dans une scène ; supprimer ne retire que de la scène en cours ; dupliquer une scène reprend ses sources par référence. Sources rangées une seule fois dans les réglages (version 2), scènes = listes d'identifiants. Copier autorisé pendant un enregistrement, coller et dupliquer bloqués ; sources partagées signalées dans la liste |
 
 ---
 
