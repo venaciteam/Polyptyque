@@ -320,6 +320,18 @@ component PreviewGrid inherits Rectangle {
         Bridge.card-width = self.cell-width;
     }
 
+    // Glisser-déposer d'une carte : carte déplacée (-1 : aucune), pointeur
+    // dans la grille et point de la carte attrapé, emplacement d'arrivée.
+    property <int> drag-from: -1;
+    property <length> drag-x;
+    property <length> drag-y;
+    property <length> grab-x;
+    property <length> grab-y;
+    property <bool> drag-inside: drag-from >= 0 && drag-x >= 0 && drag-x <= self.width && drag-y >= 0 && drag-y <= self.height;
+    property <int> drag-column: max(0, min(columns - 1, Math.floor((drag-x - offset-x + spacing / 2) / (cell-width + spacing))));
+    property <int> drag-row: max(0, min(rows - 1, Math.floor((drag-y - offset-y + spacing / 2) / (cell-height + spacing))));
+    property <int> drag-to: min(count - 1, drag-row * columns + drag-column);
+
     if count == 0: Rectangle {
         border-radius: Theme.radius;
         border-width: 1px;
@@ -369,6 +381,8 @@ component PreviewGrid inherits Rectangle {
         width: cell-width;
         height: cell-height;
         card: card;
+        draggable: !Bridge.recording && root.count > 1;
+        lifted: index == root.drag-from;
         open-window => {
             Bridge.open-source(card.id);
         }
@@ -377,6 +391,69 @@ component PreviewGrid inherits Rectangle {
         }
         toggle-recording => {
             Bridge.toggle-source(card.id);
+        }
+        drag-moved(dx, dy, x, y) => {
+            root.drag-from = index;
+            root.drag-x = self.x + x;
+            root.drag-y = self.y + y;
+            root.grab-x = x - dx;
+            root.grab-y = y - dy;
+        }
+        drag-ended => {
+            if root.drag-inside {
+                Bridge.move-source-to(root.drag-from, root.drag-to);
+            }
+            root.drag-from = -1;
+        }
+        drag-cancelled => {
+            root.drag-from = -1;
+        }
+    }
+
+    // Emplacement où la carte arrivera si elle est lâchée ici.
+    if drag-from >= 0 && drag-inside && drag-to != drag-from: Rectangle {
+        x: offset-x + Math.mod(drag-to, columns) * (cell-width + spacing);
+        y: offset-y + Math.floor(drag-to / columns) * (cell-height + spacing);
+        width: cell-width;
+        height: cell-height;
+        border-radius: Theme.radius;
+        border-width: 2px;
+        border-color: Theme.accent;
+        background: Theme.accent.with-alpha(0.08);
+    }
+
+    // La carte déplacée, en réduit, sous le pointeur.
+    if drag-from >= 0: Rectangle {
+        width: cell-width / 2;
+        height: cell-height / 2;
+        x: drag-x - grab-x / 2;
+        y: drag-y - grab-y / 2;
+        border-radius: Theme.radius;
+        border-width: 1px;
+        border-color: Theme.accent;
+        background: Theme.surface;
+        clip: true;
+        opacity: 0.9;
+        VerticalLayout {
+            Rectangle {
+                vertical-stretch: 1;
+                background: Theme.preview-background;
+                Image {
+                    source: Bridge.cards[root.drag-from].preview;
+                    width: parent.width;
+                    height: parent.height;
+                    image-fit: contain;
+                }
+            }
+            Text {
+                text: Bridge.cards[root.drag-from].name;
+                color: Theme.text;
+                font-weight: 600;
+                overflow: elide;
+                height: 26px;
+                vertical-alignment: center;
+                horizontal-alignment: center;
+            }
         }
     }
 }
@@ -433,10 +510,19 @@ component ScenesPanel inherits Panel {
     }
 }
 
-// Ligne de la liste des sources, avec son menu (clic droit).
+// Ligne de la liste des sources, avec son menu (clic droit) et le
+// glisser-déposer.
 component SourceRow inherits Rectangle {
     in property <SourceItem> source;
     in property <int> index;
+    in property <bool> draggable;
+    // Ligne en cours de déplacement, atténuée à sa place.
+    in property <bool> lifted;
+    // Trait d'arrivée : 0 aucun, 1 au-dessus, 2 au-dessous.
+    in property <int> drop-line;
+    callback drag-moved(length, length, length, length);
+    callback drag-ended();
+    callback drag-cancelled();
 
     height: 38px;
 
@@ -461,11 +547,13 @@ component SourceRow inherits Rectangle {
     // sélectionne avant d'ouvrir le menu.
     ListRow {
         width: parent.width;
+        opacity: root.lifted ? 0.4 : 1;
         text: root.source.name;
         detail: root.source.kind;
         icon: root.source.browser ? @image-url("icons/globe.svg") : @image-url("icons/window.svg");
         has-icon: true;
         selected: root.index == Bridge.selected-source;
+        draggable: root.draggable;
         clicked => {
             Bridge.selected-source = root.index;
         }
@@ -473,12 +561,36 @@ component SourceRow inherits Rectangle {
             Bridge.selected-source = root.index;
             menu.show({ x: x, y: y });
         }
+        drag-moved(dx, dy, x, y) => {
+            root.drag-moved(dx, dy, x, y);
+        }
+        drag-ended => {
+            root.drag-ended();
+        }
+        drag-cancelled => {
+            root.drag-cancelled();
+        }
+    }
+    if root.drop-line != 0: Rectangle {
+        y: root.drop-line == 1 ? 0 : parent.height - self.height;
+        height: 2px;
+        border-radius: 1px;
+        background: Theme.accent;
     }
 }
 
 component SourcesPanel inherits Panel {
     title: "SOURCES";
-    Rectangle {
+
+    // Glisser-déposer d'une ligne : ligne déplacée (-1 : aucune), pointeur
+    // dans la liste, rang d'arrivée.
+    property <int> drag-from: -1;
+    property <length> drag-x;
+    property <length> drag-y;
+    property <bool> drag-inside: drag-from >= 0 && drag-x >= 0 && drag-x <= list-area.width && drag-y >= 0 && drag-y <= list-area.height;
+    property <int> drag-to: max(0, min(Bridge.sources.length - 1, Math.floor((drag-y - list.content-y) / 38px)));
+
+    list-area := Rectangle {
         vertical-stretch: 1;
         // Clic droit dans le vide de la liste : coller.
         ContextMenuArea {
@@ -492,12 +604,30 @@ component SourcesPanel inherits Panel {
                 }
             }
         }
-        ListView {
+        list := ListView {
             width: parent.width;
             height: parent.height;
             for source[index] in Bridge.sources: SourceRow {
                 source: source;
                 index: index;
+                draggable: !Bridge.recording && Bridge.sources.length > 1;
+                lifted: index == root.drag-from;
+                drop-line: !root.drag-inside || index != root.drag-to || root.drag-to == root.drag-from ? 0
+                    : root.drag-to < root.drag-from ? 1 : 2;
+                drag-moved(dx, dy, x, y) => {
+                    root.drag-from = index;
+                    root.drag-x = self.absolute-position.x + x - list-area.absolute-position.x;
+                    root.drag-y = self.absolute-position.y + y - list-area.absolute-position.y;
+                }
+                drag-ended => {
+                    if root.drag-inside {
+                        Bridge.move-source-to(root.drag-from, root.drag-to);
+                    }
+                    root.drag-from = -1;
+                }
+                drag-cancelled => {
+                    root.drag-from = -1;
+                }
             }
         }
     }

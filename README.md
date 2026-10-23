@@ -94,6 +94,7 @@ Polyptyque fait l'inverse : **chaque fenêtre est enregistrée à part**, dans s
 **Simple à utiliser**
 - Scènes (groupes de sources), aperçus en direct de chaque source, raccourcis clavier globaux.
 - Une même source dans plusieurs scènes : copier, coller (clic droit, ou <kbd>Ctrl</kbd> + <kbd>C</kbd> / <kbd>Ctrl</kbd> + <kbd>V</kbd>), ou dupliquer toute une scène. C'est la même fenêtre et, pour un navigateur, les mêmes connexions : rien à reconfigurer.
+- Sources réordonnées par glisser-déposer, dans la liste ou directement dans la grille des aperçus (ou avec les flèches).
 - Niveau sonore de chaque source affiché en permanence, même sans enregistrer : une source muette se repère avant de lancer l'enregistrement.
 - Un bouton pour tout enregistrer, ou un bouton par source pour enregistrer une source seule.
 - Encodage par la carte graphique (NVIDIA, AMD, Intel) quand elle est disponible, ou par le processeur. Si la carte refuse un encodage de plus (limite des cartes GeForce, autres logiciels compris), la source passe seule sur le processeur.

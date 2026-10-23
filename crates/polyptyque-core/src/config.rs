@@ -226,6 +226,18 @@ impl Config {
         Ok(())
     }
 
+    /// Déplace la source de la position `from` à la position `to` dans la
+    /// scène active ; les autres se décalent. Faux si rien ne change.
+    pub fn move_source(&mut self, from: usize, to: usize) -> bool {
+        let ids = &mut self.active_scene_mut().source_ids;
+        if from == to || from >= ids.len() || to >= ids.len() {
+            return false;
+        }
+        let id = ids.remove(from);
+        ids.insert(to, id);
+        true
+    }
+
     /// Retire une source de la scène active seulement. Si elle n'est plus
     /// dans aucune scène, elle disparaît (son profil reste sur le disque).
     pub fn remove_source(&mut self, source_id: &str) {
@@ -1062,6 +1074,32 @@ name = "Archive"
         config.scenes = vec![Scene::new("Vide")];
         config.normalize();
         assert!(config.sources.is_empty());
+    }
+
+    #[test]
+    fn sources_move_within_their_scene() {
+        let mut config = sample();
+        let third = config.sources[1].clone();
+        let third = Source { id: new_id(), name: "Troisième".into(), ..third };
+        config.add_source(third);
+        let ids = config.active_scene().source_ids.clone();
+        let copy = config.duplicate_scene(&config.active_scene.clone(), "Copie").unwrap();
+        // La première passe en dernier, les autres remontent.
+        assert!(config.move_source(0, 2));
+        assert_eq!(config.active_scene().source_ids, [ids[1].clone(), ids[2].clone(), ids[0].clone()]);
+        // Et revient en tête.
+        assert!(config.move_source(2, 0));
+        assert_eq!(config.active_scene().source_ids, ids);
+        assert!(config.move_source(1, 2));
+        assert_eq!(config.active_scene().source_ids, [ids[0].clone(), ids[2].clone(), ids[1].clone()]);
+        // Rien à faire, ou hors limites.
+        assert!(!config.move_source(1, 1));
+        assert!(!config.move_source(0, 3));
+        assert!(!config.move_source(3, 0));
+        // L'ordre est propre à chaque scène : l'autre ne bouge pas.
+        assert_eq!(config.active_scene, copy);
+        config.active_scene = config.scenes[0].id.clone();
+        assert_eq!(config.active_scene().source_ids, ids);
     }
 
     #[test]

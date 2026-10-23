@@ -509,6 +509,9 @@ fn install_callbacks(ui: &AppWindow) {
     b.on_move_source(|delta| {
         with_app(|a| a.move_source(delta));
     });
+    b.on_move_source_to(|from, to| {
+        with_app(|a| a.move_source_to(from, to));
+    });
     b.on_copy_source(|| {
         with_app(|a| a.copy_source());
     });
@@ -2471,25 +2474,26 @@ impl App {
         }
     }
 
+    /// Flèches : la source sélectionnée monte ou descend d'un rang.
     fn move_source(&self, delta: i32) {
+        let index = self.with_bridge_value(|b| b.get_selected_source());
+        self.move_source_to(index, index + delta);
+    }
+
+    /// Glisser-déposer (liste ou grille des aperçus) et flèches : la source
+    /// passe de la position `from` à la position `to`, puis est
+    /// sélectionnée.
+    fn move_source_to(&self, from: i32, to: i32) {
         if self.locked() {
             return;
         }
-        let Some(ui) = self.ui.upgrade() else {
+        let (Ok(from), Ok(to)) = (usize::try_from(from), usize::try_from(to)) else {
             return;
         };
-        let bridge = ui.global::<Bridge>();
-        let index = bridge.get_selected_source();
-        let target = index + delta;
-        {
-            let mut config = self.config.borrow_mut();
-            let sources = &mut config.active_scene_mut().source_ids;
-            if index < 0 || target < 0 || target as usize >= sources.len() {
-                return;
-            }
-            sources.swap(index as usize, target as usize);
+        if !self.config.borrow_mut().move_source(from, to) {
+            return;
         }
-        bridge.set_selected_source(target);
+        self.with_bridge(|b| b.set_selected_source(to as i32));
         self.save();
         self.refresh_all();
         self.restart_previews();

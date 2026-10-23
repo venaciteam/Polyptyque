@@ -226,6 +226,9 @@ export global Bridge {
     callback confirm-add-application();
     callback request-remove-source();
     callback move-source(int);
+    // Glisser-déposer : la source passe de la première position à la
+    // seconde (les autres se décalent).
+    callback move-source-to(int, int);
     // Copie la source sélectionnée ; colle la source copiée dans la scène en
     // cours (la même source, partagée entre les scènes).
     callback copy-source();

@@ -140,7 +140,7 @@ graph TD
 - Une scène contient une liste ordonnée de sources.
 - **Verrouillage pendant l'enregistrement** : tant qu'au moins une source enregistre, il est impossible de :
 	- changer de scène ;
-	- ajouter, coller ou supprimer une source ; dupliquer une scène ;
+	- ajouter, coller, supprimer ou réordonner une source ; dupliquer une scène ;
 	- modifier les réglages d'encodage.
 - La scène active à la fermeture est rouverte au lancement suivant.
 
@@ -383,6 +383,10 @@ Inspirée d'[[OBS Studio]], volontairement allégée, thème sombre.
 > ![Ajout d'une source navigateur](captures/interface-ajout-navigateur.png)
 > ![Ajout d'une source application](captures/interface-ajout-application.png)
 - Par source : nom, état, cadence réelle, indicateur de niveau sonore, durée, taille du fichier, bouton d'enregistrement individuel.
+- **Ordre des sources** : le même dans la liste des sources et dans la grille des aperçus, propre à chaque scène. Il se change :
+	- avec les flèches du panneau des sources (seul moyen au clavier ou avec un lecteur d'écran) ;
+	- par **glisser-déposer**, dans la liste comme dans la grille. Le glisser démarre après 8 px de déplacement bouton enfoncé : un simple clic reste un clic, et un appui sur un bouton d'une carte (enregistrement, ouvrir ou rétablir la fenêtre) ne déplace jamais la carte. Pendant le glisser, la source reste atténuée à sa place ; un trait (liste) ou un cadre (grille) montre où elle arrivera, et dans la grille une version réduite de la carte suit le pointeur. Relâcher hors de la liste ou de la grille annule. La source déplacée devient la source sélectionnée.
+	- Bloqué pendant un enregistrement, comme les flèches. La liste ne défile pas seule pendant un glisser : pour un grand déplacement, la grille montre toutes les sources.
 - Niveau sonore affiché **en permanence**, pas seulement pendant l'enregistrement : chaque source écoute le son de son programme (même capture que l'enregistrement, seule la crête est gardée). Dès que le moteur écoute la source (enregistrement, préparation, finalisation), cette écoute s'arrête et la carte affiche le niveau du moteur. Indépendant du réglage des aperçus.
 - Barre du haut : pastille de la programmation (voir [[#Programmation des enregistrements]]), pastille du micro (avec son niveau pendant l'enregistrement) et pastille de la conversion MP4 en cours.
 - **Barre d'état** : espace disque libre, autonomie estimée, charge processeur et carte graphique, images perdues.
@@ -651,11 +655,12 @@ Seule une implémentation de `Platform` est à écrire pour chaque système (`po
 > - [x] Vérifié en mode démonstration (démarrage manqué, démarrage à l'heure, créneaux bout à bout, arrêt automatique)
 > - [ ] Validation sur la machine de référence, dont session verrouillée et écran éteint ([[protocole-test-programmation]])
 
-> [!todo] Étape 3 quater - Sources partagées entre scènes, écrite le 2026-10-23
+> [!todo] Étape 3 quater - Sources partagées entre scènes, glisser-déposer, écrite le 2026-10-23
 > - [x] Copier-coller d'une source par référence (clic droit, <kbd>Ctrl</kbd> + <kbd>C</kbd> / <kbd>Ctrl</kbd> + <kbd>V</kbd>), refus d'un doublon dans une scène
 > - [x] Suppression limitée à la scène en cours ; duplication d'une scène par référence
 > - [x] Réglages en version 2 (sources rangées à part), conversion automatique de la version 1
-> - [x] Vérifié en mode démonstration (copier, coller, refus, menus, raccourcis, duplication, textes de confirmation)
+> - [x] Sources réordonnées par glisser-déposer dans la liste et dans la grille des aperçus (flèches conservées)
+> - [x] Vérifié en mode démonstration (copier, coller, refus, menus, raccourcis, duplication, textes de confirmation, glisser-déposer, seuil, annulation, boutons des cartes)
 > - [ ] Validation sur la machine de référence
 
 > [!todo] Étape 4 - Publication
@@ -733,6 +738,7 @@ Seule une implémentation de `Platform` est à écrire pour chaque système (`po
 | 2026-10-23 | Chevauchements de programmations refusés (créneaux bout à bout acceptés) ; heure inexistante décalée de la durée du saut, heure double prise à sa première occurrence (RFC 5545) ; démarrage direct jusqu'à 30 s de retard |
 | 2026-10-23 | Publication de la 1.0.0-beta.3 (préversion) : programmation des enregistrements, lancement au démarrage de Windows |
 | 2026-10-23 | Copier-coller d'une source **par référence** (même source, même profil, dans plusieurs scènes), jamais deux fois dans une scène ; supprimer ne retire que de la scène en cours ; dupliquer une scène reprend ses sources par référence. Sources rangées une seule fois dans les réglages (version 2), scènes = listes d'identifiants. Copier autorisé pendant un enregistrement, coller et dupliquer bloqués ; sources partagées signalées dans la liste |
+| 2026-10-23 | Glisser-déposer des sources dans la liste et dans la grille des aperçus (même ordre), en plus des flèches : seuil de 8 px, boutons des cartes jamais déclencheurs, relâcher hors zone = annulé, bloqué pendant un enregistrement. Fait sans le glisser-déposer intégré de Slint (`DragArea`/`DropArea`, prévu pour échanger avec d'autres logiciels). Pas de défilement automatique de la liste pendant un glisser (la grille montre toutes les sources) |
 
 ---
 

@@ -163,6 +163,55 @@ export component Panel inherits Rectangle {
     }
 }
 
+// Zone cliquable qui sait aussi glisser : bouton enfoncé, au-delà d'un
+// petit déplacement, le clic devient un glisser (le clic n'est alors pas
+// envoyé). Sous les boutons d'une carte, elle ne reçoit jamais leurs clics.
+export component DragDetector inherits TouchArea {
+    // Glisser permis (sinon : simple zone cliquable).
+    in property <bool> draggable;
+    // Déplacement avant de démarrer un glisser.
+    in property <length> threshold: 8px;
+    out property <bool> dragging;
+    callback click();
+    // Clic droit, à cette position dans la zone.
+    callback right-press(length, length);
+    // Déplacement depuis l'appui, puis position du pointeur dans la zone.
+    callback drag-moved(length, length, length, length);
+    callback drag-ended();
+    // Bouton relâché hors de portée (fenêtre quittée…) : rien à déposer.
+    callback drag-cancelled();
+
+    clicked => {
+        if !self.dragging {
+            root.click();
+        }
+    }
+    moved => {
+        if !self.dragging && root.draggable
+            && (abs(self.mouse-x - self.pressed-x) > root.threshold || abs(self.mouse-y - self.pressed-y) > root.threshold) {
+            self.dragging = true;
+        }
+        if self.dragging {
+            root.drag-moved(self.mouse-x - self.pressed-x, self.mouse-y - self.pressed-y, self.mouse-x, self.mouse-y);
+        }
+    }
+    pointer-event(event) => {
+        if event.button == PointerEventButton.right && event.kind == PointerEventKind.down {
+            root.right-press(self.mouse-x, self.mouse-y);
+        }
+        if event.button == PointerEventButton.left && event.kind == PointerEventKind.up && self.dragging {
+            self.dragging = false;
+            root.drag-ended();
+        }
+    }
+    changed pressed => {
+        if !self.pressed && self.dragging {
+            self.dragging = false;
+            root.drag-cancelled();
+        }
+    }
+}
+
 // Ligne de liste sélectionnable.
 export component ListRow inherits Rectangle {
     in property <string> text;
@@ -174,6 +223,12 @@ export component ListRow inherits Rectangle {
     callback clicked;
     // Clic droit, à cette position dans la ligne.
     callback right-clicked(length, length);
+    // Glisser-déposer (voir `DragDetector`).
+    in property <bool> draggable: false;
+    out property <bool> dragging: touch.dragging;
+    callback drag-moved(length, length, length, length);
+    callback drag-ended();
+    callback drag-cancelled();
 
     height: 38px;
     border-radius: Theme.radius-small;
@@ -216,16 +271,24 @@ export component ListRow inherits Rectangle {
         }
     }
 
-    touch := TouchArea {
+    touch := DragDetector {
         enabled: root.enabled;
-        mouse-cursor: root.enabled ? pointer : default;
-        clicked => {
+        draggable: root.draggable;
+        mouse-cursor: self.dragging ? grabbing : root.enabled ? pointer : default;
+        click => {
             root.clicked();
         }
-        pointer-event(event) => {
-            if event.button == PointerEventButton.right && event.kind == PointerEventKind.down {
-                root.right-clicked(self.mouse-x, self.mouse-y);
-            }
+        right-press(x, y) => {
+            root.right-clicked(x, y);
+        }
+        drag-moved(dx, dy, x, y) => {
+            root.drag-moved(dx, dy, x, y);
+        }
+        drag-ended => {
+            root.drag-ended();
+        }
+        drag-cancelled => {
+            root.drag-cancelled();
         }
     }
 }
@@ -266,9 +329,16 @@ component RecordToggle inherits Rectangle {
 // Carte d'une source : aperçu, état, son, taille du fichier.
 export component SourceCardView inherits Rectangle {
     in property <SourceCard> card;
+    // Glisser-déposer (voir `DragDetector`) ; `lifted` : carte en cours de
+    // déplacement, atténuée à sa place.
+    in property <bool> draggable;
+    in property <bool> lifted;
     callback open-window();
     callback restore-window();
     callback toggle-recording();
+    callback drag-moved(length, length, length, length);
+    callback drag-ended();
+    callback drag-cancelled();
 
     property <bool> recording: root.card.recording;
 
@@ -277,6 +347,23 @@ export component SourceCardView inherits Rectangle {
     border-width: 1px;
     border-color: root.recording ? Theme.recording.with-alpha(0.55) : Theme.border;
     clip: true;
+    opacity: root.lifted ? 0.4 : 1;
+
+    // Sous le contenu : les boutons de la carte gardent leurs clics ; partout
+    // ailleurs, appuyer puis déplacer déplace la carte.
+    DragDetector {
+        draggable: root.draggable;
+        mouse-cursor: self.dragging ? grabbing : default;
+        drag-moved(dx, dy, x, y) => {
+            root.drag-moved(dx, dy, x, y);
+        }
+        drag-ended => {
+            root.drag-ended();
+        }
+        drag-cancelled => {
+            root.drag-cancelled();
+        }
+    }
 
     VerticalLayout {
         Rectangle {
