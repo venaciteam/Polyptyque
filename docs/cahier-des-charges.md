@@ -739,6 +739,7 @@ Seule une implémentation de `Platform` est à écrire pour chaque système (`po
 | 2026-10-23 | Publication de la 1.0.0-beta.3 (préversion) : programmation des enregistrements, lancement au démarrage de Windows |
 | 2026-10-23 | Copier-coller d'une source **par référence** (même source, même profil, dans plusieurs scènes), jamais deux fois dans une scène ; supprimer ne retire que de la scène en cours ; dupliquer une scène reprend ses sources par référence. Sources rangées une seule fois dans les réglages (version 2), scènes = listes d'identifiants. Copier autorisé pendant un enregistrement, coller et dupliquer bloqués ; sources partagées signalées dans la liste |
 | 2026-10-23 | Glisser-déposer des sources dans la liste et dans la grille des aperçus (même ordre), en plus des flèches : seuil de 8 px, boutons des cartes jamais déclencheurs, relâcher hors zone = annulé, bloqué pendant un enregistrement. Fait sans le glisser-déposer intégré de Slint (`DragArea`/`DropArea`, prévu pour échanger avec d'autres logiciels). Pas de défilement automatique de la liste pendant un glisser (la grille montre toutes les sources) |
+| 2026-10-23 | Publication de la 1.0.0-beta.4 (préversion) : sources partagées entre scènes (copier-coller par référence, duplication de scène), glisser-déposer des sources |
 
 ---
 
