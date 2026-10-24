@@ -3690,9 +3690,12 @@ dependencies = [
  "polyptyque-windows",
  "raw-window-handle",
  "rfd",
+ "rspolib",
  "simplelog",
  "slint",
  "slint-build",
+ "sys-locale",
+ "tr",
  "velopack",
 ]
 
@@ -3722,6 +3725,7 @@ dependencies = [
  "directories",
  "serde",
  "toml",
+ "tr",
 ]
 
 [[package]]
@@ -3732,6 +3736,7 @@ dependencies = [
  "crossbeam-channel",
  "log",
  "polyptyque-core",
+ "tr",
 ]
 
 [[package]]
@@ -3741,6 +3746,7 @@ dependencies = [
  "anyhow",
  "log",
  "polyptyque-core",
+ "tr",
  "wasapi",
  "windows",
 ]
@@ -5030,6 +5036,15 @@ name = "toml_writer"
 version = "1.1.3+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06bdbd8cfc056b8d2e2e85f29b56a3bdbecb527cef81eb39e3e7b98af4652770"
+
+[[package]]
+name = "tr"
+version = "0.1.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "79d30c7e79732253d80e9d619007002c8f3a362b0816e37340af648d4e2c6092"
+dependencies = [
+ "rspolib",
+]
 
 [[package]]
 name = "tracing"

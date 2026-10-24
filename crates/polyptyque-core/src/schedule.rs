@@ -25,6 +25,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Datelike, Duration, LocalResult, NaiveDate, NaiveDateTime, NaiveTime, Offset, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
+use tr::tr;
 
 use crate::config::new_id;
 use crate::storage;
@@ -92,7 +93,7 @@ impl TryFrom<String> for TimeOfDay {
     type Error = String;
 
     fn try_from(text: String) -> Result<Self, Self::Error> {
-        Self::parse(&text).ok_or_else(|| format!("heure invalide : « {text} »"))
+        Self::parse(&text).ok_or_else(|| tr!("heure invalide : « {} »", text))
     }
 }
 
@@ -131,8 +132,32 @@ pub fn parse_date(text: &str, today: NaiveDate) -> Option<NaiveDate> {
 
 // ----- Programmation -------------------------------------------------------
 
-/// Jours de la semaine, du lundi (1) au dimanche (7).
-pub const DAY_NAMES: [&str; 7] = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"];
+/// Nom d'un jour, du lundi (1) au dimanche (7), tel qu'il s'écrit au
+/// milieu d'une phrase (« lundi », « Monday »).
+pub fn day_name(day: u8) -> String {
+    match day {
+        1 => tr!("lundi"),
+        2 => tr!("mardi"),
+        3 => tr!("mercredi"),
+        4 => tr!("jeudi"),
+        5 => tr!("vendredi"),
+        6 => tr!("samedi"),
+        _ => tr!("dimanche"),
+    }
+}
+
+/// Abréviation d'un jour, du lundi (1) au dimanche (7).
+fn day_abbreviation(day: u8) -> String {
+    match day {
+        1 => tr!("Lun"),
+        2 => tr!("Mar"),
+        3 => tr!("Mer"),
+        4 => tr!("Jeu"),
+        5 => tr!("Ven"),
+        6 => tr!("Sam"),
+        _ => tr!("Dim"),
+    }
+}
 
 /// Répétition d'une programmation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -311,7 +336,7 @@ impl Schedule {
     /// « 21:00 → 22:00 », « 22:00 → 02:00 (lendemain) ».
     pub fn times_label(&self) -> String {
         if self.crosses_midnight() {
-            format!("{} → {} (lendemain)", self.start, self.end)
+            tr!("{} → {} (lendemain)", self.start, self.end)
         } else {
             format!("{} → {}", self.start, self.end)
         }
@@ -321,21 +346,17 @@ impl Schedule {
     /// « Une fois, le 25/10/2026 ».
     pub fn repeat_label(&self) -> String {
         match &self.repeat {
-            Repeat::Once { date } => format!("Une fois, le {}", date.format("%d/%m/%Y")),
+            Repeat::Once { date } => tr!("Une fois, le {}", date.format("%d/%m/%Y")),
             Repeat::Weekly { days } => {
                 let mut days: Vec<u8> = days.iter().copied().filter(|d| (1..=7).contains(d)).collect();
                 days.sort_unstable();
                 days.dedup();
                 match days.as_slice() {
-                    [1, 2, 3, 4, 5, 6, 7] => "Tous les jours".into(),
-                    [1, 2, 3, 4, 5] => "Du lundi au vendredi".into(),
-                    [6, 7] => "Le week-end".into(),
-                    [day] => format!("Chaque {}", DAY_NAMES[usize::from(day - 1)]),
-                    days => {
-                        let names: Vec<String> =
-                            days.iter().map(|d| capitalize(&DAY_NAMES[usize::from(d - 1)][..3])).collect();
-                        names.join(", ")
-                    }
+                    [1, 2, 3, 4, 5, 6, 7] => tr!("Tous les jours"),
+                    [1, 2, 3, 4, 5] => tr!("Du lundi au vendredi"),
+                    [6, 7] => tr!("Le week-end"),
+                    [day] => tr!("Chaque {}", day_name(*day)),
+                    days => days.iter().map(|&d| day_abbreviation(d)).collect::<Vec<_>>().join(", "),
                 }
             }
         }
@@ -371,23 +392,18 @@ pub fn any_active<Tz: TimeZone>(schedules: &[Schedule], now: DateTime<Utc>, tz: 
 pub fn when_label<Tz: TimeZone>(at: DateTime<Utc>, now: DateTime<Utc>, tz: &Tz) -> String {
     let at = at.with_timezone(tz).naive_local();
     let today = now.with_timezone(tz).date_naive();
-    let time = at.format("%H:%M");
+    let time = at.format("%H:%M").to_string();
     match (at.date() - today).num_days() {
-        0 => format!("aujourd'hui à {time}"),
-        1 => format!("demain à {time}"),
-        2..=6 => format!("{} à {time}", DAY_NAMES[at.weekday().num_days_from_monday() as usize]),
-        _ => format!("le {} à {time}", at.format("%d/%m")),
+        0 => tr!("aujourd'hui à {}", time),
+        1 => tr!("demain à {}", time),
+        2..=6 => tr!("{} à {}", day_name(at.weekday().number_from_monday() as u8), time),
+        _ => tr!("le {} à {}", at.format("%d/%m"), time),
     }
 }
 
 /// Heure locale d'un instant : « 22:00 ».
 pub fn clock_label<Tz: TimeZone>(at: DateTime<Utc>, tz: &Tz) -> String {
     at.with_timezone(tz).naive_local().format("%H:%M").to_string()
-}
-
-fn capitalize(text: &str) -> String {
-    let mut chars = text.chars();
-    chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default()
 }
 
 fn default_true() -> bool {

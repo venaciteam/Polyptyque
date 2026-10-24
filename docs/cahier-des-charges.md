@@ -36,9 +36,10 @@ type: projet
 	9. [[#Conversion MKV vers MP4]]
 	10. [[#Réglages d'encodage]]
 	11. [[#Interface]]
-	12. [[#Raccourcis clavier]]
-	13. [[#Préparation de la diffusion en direct]]
-	14. [[#Installation]]
+	12. [[#Langues et formats]]
+	13. [[#Raccourcis clavier]]
+	14. [[#Préparation de la diffusion en direct]]
+	15. [[#Installation]]
 5. [[#Exigences non fonctionnelles]]
 	1. [[#Fiabilité]]
 	2. [[#Performance]]
@@ -235,6 +236,7 @@ Au lancement de Polyptyque (réglage « Ouvrir les fenêtres de la scène au lan
 - **Programmation** : lance une scène (toutes ses sources) de l'heure de début à l'heure de fin, à la minute près.
 	- Répétition : **une seule fois** (une date), ou **chaque semaine certains jours** (les sept : tous les jours). Les jours désignent le jour où le créneau commence.
 	- Une heure de fin antérieure ou égale à l'heure de début désigne **le lendemain** : un créneau 22:00 → 02:00 passe minuit. Un début égal à la fin est refusé (pas de créneau de 24 h).
+	- Heures et dates affichées et saisies selon [[#Langues et formats]] : réglage « Horloge » (24 h ou 12 h), date choisie dans un sélecteur.
 	- Activer, désactiver, modifier, supprimer. Supprimer une scène supprime ses programmations (la confirmation le dit).
 	- Une programmation dont l'enregistrement est en cours ne peut être ni modifiée ni supprimée avant la fin de son créneau.
 - **Un seul enregistrement à la fois** : deux programmations activées qui se chevauchent sont refusées, avec le nom de l'autre. Des créneaux bout à bout (l'un finit à 22:00, l'autre commence à 22:00) sont acceptés : le second démarre dès que les fichiers du premier sont finalisés.
@@ -306,7 +308,7 @@ Au lancement de Polyptyque (réglage « Ouvrir les fenêtres de la scène au lan
 | `{scène}` | `Podcast` |
 | `{source}` | `Discord` |
 
-- Modèle par défaut : `{date}_{heure}_{scène}_{source}` → `2026-10-20_14h32_Podcast_Discord.mkv`
+- Modèle par défaut : `{date}_{heure}_{scène}_{source}` → `2026-10-20_14h32_Podcast_Discord.mkv` (en anglais : `{date}_{time}_{scene}_{source}` → `2026-10-20_14-32_Podcast_Discord.mkv`, voir [[#Langues et formats]])
 - **Aucun écrasement** : si le fichier existe, un suffixe numérique est ajouté.
 - Après une relance de l'encodeur, la suite est dans `…_partie2.mkv`, `…_partie3.mkv`, etc. Le titre inscrit dans le fichier indique le moment de la reprise.
 - Le micro est enregistré dans `…_Micro.mka` (variable `{source}` remplacée par « Micro »).
@@ -391,19 +393,66 @@ Inspirée d'[[OBS Studio]], volontairement allégée, thème sombre.
 - Barre du haut : pastille de la programmation (voir [[#Programmation des enregistrements]]), pastille du micro (avec son niveau pendant l'enregistrement) et pastille de la conversion MP4 en cours.
 - **Barre d'état** : espace disque libre, autonomie estimée, charge processeur et carte graphique, images perdues.
 - **Fenêtre de paramètres** : Sortie, Encodage, Audio, Raccourcis, Général.
-- Langue : français au départ, textes externalisés pour permettre la traduction (public visé : grand public).
+- Langues : français et anglais, voir [[#Langues et formats]].
 - Accessibilité : navigation complète au clavier, compatibilité lecteur d'écran selon la technologie d'interface retenue.
 
 > [!todo] Pas encore réalisé (constat du 2026-10-22)
 > Comparaison de ce cahier avec le code, pour ne rien oublier :
 > - cadence réelle et durée sur chaque carte ; charge du processeur et de la carte graphique dans la barre d'état ;
 > - fenêtre de paramètres en sections (aujourd'hui : une feuille en deux colonnes « Enregistrement » et « Fichiers et interface ») ;
-> - textes externalisés pour la traduction ; navigation complète au clavier ;
+> - navigation complète au clavier (les textes externalisés pour la traduction sont un chantier ouvert le 2026-10-24 : [[#Langues et formats]]) ;
 > - réglages d'encodage : résolution et cadence personnalisées depuis l'interface, contrôle du débit (débit constant imposé aujourd'hui), préréglage, choix d'un encodeur précis, codecs proposés selon le matériel ;
 > - découpage automatique (toutes les N heures ou N Go) ;
 > - alertes de disque par paliers et avertissement avant le démarrage ;
 > - test de capacité d'encodage au démarrage (aujourd'hui : l'encodeur est seulement essayé) ;
 > - modification d'une source après sa création (relance, curseur, arguments de lancement).
+
+### Langues et formats
+
+> [!important] Une vraie version anglaise, pas une traduction
+> Polyptyque existe en **français** et en **anglais**, deux versions aussi soignées l'une que l'autre. Une personne anglophone, de langue maternelle ou non, doit s'y sentir chez elle : textes écrits directement en anglais (pas de mot à mot), formats de son pays, aucun mot ni bout de phrase resté dans l'autre langue, aucune fonction moins bien expliquée qu'en français.
+
+**Choix de la langue**
+
+- **Une seule version** du logiciel (un installateur, une version portable) qui contient les deux langues.
+- **Automatique**, sans question à l'installation ni au premier lancement : Windows en français → français ; Windows dans **toute autre langue** → anglais.
+- Modifiable dans les réglages (« Automatique », « Français », « English » : chaque langue écrite dans sa propre langue), appliqué immédiatement, sans redémarrer.
+
+**Ton**
+
+- Français : **ton impersonnel** ; l'interface donne l'information, sans tutoyer, sans genrer la personne, et ne vouvoie que lorsque c'est nécessaire.
+- Anglais : registre propre à l'anglais, fixé par le lexique de référence (pas un calque du français).
+
+**Formats**
+
+| Élément | Français | Anglais |
+|---|---|---|
+| Heure affichée et saisie | Réglage « Horloge » : **Automatique (comme Windows)** par défaut, 24 h, ou 12 h | idem (`10:00 PM` en 12 h) |
+| Date dans l'interface | Avec le nom du mois : « dim. 25 oct. » | « Sun, Oct 25 » |
+| Saisie d'une date (programmation) | Sélecteur de date, pas de champ texte | idem |
+| Premier jour de la semaine | Lundi | Lundi aussi |
+| Tailles | `1,2 Go`, `850 Mo` | `1.2 GB`, `850 MB` |
+| Cadence | `60 i/s` | `60 fps` |
+
+- Le réglage « Horloge » suit, en automatique, le format régional choisi dans Windows, indépendamment de la langue de Polyptyque : une personne qui utilise Polyptyque en anglais avec un Windows réglé en 24 h garde 22:00.
+- **Noms de fichiers** : la date reste au format `2026-10-20` dans les deux langues (seul format qui se trie dans l'ordre chronologique, et commun aux pays anglophones) ; l'heure reste en 24 h quel que soit le réglage « Horloge » (une heure en 12 h casserait le tri) : `14h32` en français, `14-32` en anglais (les deux-points sont interdits dans les noms de fichiers sous Windows).
+- **Modèle de nom** : variables acceptées dans les deux langues (`{heure}` ou `{time}`, `{scène}` ou `{scene}`) ; modèle par défaut dans la langue de l'interface (`{date}_{time}_{scene}_{source}` en anglais) pour une nouvelle configuration. Le modèle déjà enregistré dans une configuration ne change pas.
+- Noms créés par Polyptyque (micro, suffixe des parties, copies de scènes…) : dans la langue de l'interface au moment de leur création.
+
+**Hors traduction**
+
+- **Journaux** : en français, non traduits (diagnostic : une seule langue reste cherchable).
+- **Dossiers sur disque** (`données` de la version portable, `profils`, `journaux`) et clés du fichier de réglages : jamais renommés, sinon les installations existantes perdraient leurs données.
+- **Version console** (`polyptyque-console.exe`) : française pour l'instant ; elle sera traduite (ou remplacée) lors du chantier du pilotage par un modèle de langage, qui définit un mode commande non interactif.
+- Documents de travail (`docs/`) : en français. Le README existe dans les deux langues, l'anglais en tête.
+
+**Technique**
+
+- Format gettext (`.po`) ; le **français est le texte source** écrit dans le code, le catalogue anglais est `crates/polyptyque-app/lang/en/LC_MESSAGES/polyptyque-app.po`. Interface : `@tr()` de [[Slint]], traductions intégrées à l'exécutable. Messages calculés en Rust (y compris les erreurs du moteur affichées à l'écran) : macro `tr!` du crate `tr`, même syntaxe, même catalogue, intégré à l'exécutable. Aucun fichier de langue à côté du programme.
+- Les textes anglais des composants de Slint (menu clic droit des champs de texte : *Cut*, *Copy*, *Paste*…, sélecteurs de date et d'heure) sont traduits en français par un second catalogue (`lang/fr/…`) : la version française n'affiche aucun mot anglais.
+- Slint retombe sur la langue source quand la langue du système n'a pas de catalogue : c'est Polyptyque qui choisit la langue au démarrage (sinon un Windows allemand afficherait du français).
+- **Test de complétude** (`cargo test`) : il échoue si un texte n'a pas sa version anglaise. La fabrication de GitHub ne lance aucun test : il est lancé en local avant chaque publication.
+- Phrases toujours complètes et pluriels gérés par la traduction : jamais de phrase recollée à partir de morceaux, ni de « fichier(s) ».
 
 ### Raccourcis clavier
 
@@ -663,6 +712,14 @@ Seule une implémentation de `Platform` est à écrire pour chaque système (`po
 > - [x] Vérifié en mode démonstration (copier, coller, refus, menus, raccourcis, duplication, textes de confirmation, glisser-déposer, seuil, annulation, boutons des cartes)
 > - [ ] Validation sur la machine de référence
 
+> [!todo] Étape 3 quinquies - Version anglaise ([[#Langues et formats]]), écrite le 2026-10-24
+> - [ ] Textes externalisés (interface et messages Rust, erreurs du moteur comprises), phrases recollées et pluriels réécrits, copy française au ton impersonnel
+> - [ ] Lexique anglais de référence, validé avant de traduire
+> - [ ] Catalogue anglais complet, écrit directement en anglais et relu sur captures du mode démonstration
+> - [ ] Réglages « Langue » et « Horloge », appliqués immédiatement ; sélecteur de date dans la programmation
+> - [ ] README anglais en tête (`README.md`) et français (`README.fr.md`), fichier d'accompagnement de la version portable, description de l'exécutable et du dépôt GitHub
+> - [ ] Validation sur la machine de référence, en français et en anglais
+
 > [!todo] Étape 4 - Publication
 > - [ ] Dépôt public, première version publiée
 > - [ ] FFmpeg compilé par le projet (plus léger, signable)
@@ -740,6 +797,10 @@ Seule une implémentation de `Platform` est à écrire pour chaque système (`po
 | 2026-10-23 | Copier-coller d'une source **par référence** (même source, même profil, dans plusieurs scènes), jamais deux fois dans une scène ; supprimer ne retire que de la scène en cours ; dupliquer une scène reprend ses sources par référence. Sources rangées une seule fois dans les réglages (version 2), scènes = listes d'identifiants. Copier autorisé pendant un enregistrement, coller et dupliquer bloqués ; sources partagées signalées dans la liste |
 | 2026-10-23 | Glisser-déposer des sources dans la liste et dans la grille des aperçus (même ordre), en plus des flèches : seuil de 8 px, boutons des cartes jamais déclencheurs, relâcher hors zone = annulé, bloqué pendant un enregistrement. Fait sans le glisser-déposer intégré de Slint (`DragArea`/`DropArea`, prévu pour échanger avec d'autres logiciels). Pas de défilement automatique de la liste pendant un glisser (la grille montre toutes les sources) |
 | 2026-10-23 | Publication de la 1.0.0-beta.4 (préversion) : sources partagées entre scènes (copier-coller par référence, duplication de scène), glisser-déposer des sources |
+| 2026-10-24 | Version anglaise complète, écrite directement en anglais : une seule version du logiciel, langue automatique (Windows en français → français, toute autre langue → anglais), modifiable dans les réglages, sans question à l'installation ni au premier lancement |
+| 2026-10-24 | Textes externalisés en gettext (`.po`), français comme texte source : `@tr` de Slint et crate `tr` côté Rust, catalogues intégrés à l'exécutable ; test de complétude lancé en local avant chaque publication. Journaux non traduits. Console traduite lors du chantier du pilotage par un modèle de langage |
+| 2026-10-24 | Formats : réglage « Horloge » (automatique comme Windows par défaut, 24 h ou 12 h) ; dates de l'interface écrites avec le nom du mois, saisie par sélecteur de date ; semaine commençant le lundi ; noms de fichiers en date ISO et heure 24 h dans les deux langues (`14h32` / `14-32`) |
+| 2026-10-24 | Copy française au ton impersonnel (fin du tutoiement, laissé passer jusqu'à la bêta 4) : pas de « tu », pas de genre, vouvoiement seulement si nécessaire |
 
 ---
 

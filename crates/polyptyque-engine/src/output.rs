@@ -25,6 +25,7 @@ use polyptyque_core::encoder::{
 use polyptyque_core::naming;
 use polyptyque_core::platform::{Nv12Frame, Platform};
 use polyptyque_core::storage;
+use tr::tr;
 
 use crate::shared::Shared;
 use crate::writer::{self, PartControl, WriterJob};
@@ -122,12 +123,13 @@ impl OutputTask {
             let streams = Streams { video: video.as_ref(), audio: &audio, video_start, audio_start, resume_seconds };
             let end = match Part::start(platform.as_ref(), &plan, &shared, &output, part, streams) {
                 Ok(running) => running.supervise(&shared, &plan.log),
-                Err(e) if plan.ffmpeg.is_absolute() && !plan.ffmpeg.exists() => PartEnd::Crashed(format!(
+                Err(e) if plan.ffmpeg.is_absolute() && !plan.ffmpeg.exists() => PartEnd::Crashed(tr!(
                     "FFmpeg a disparu ({}) : un antivirus l'a peut-être mis en quarantaine ; le restaurer, ou \
-                     réinstaller Polyptyque ({e:#})",
-                    plan.ffmpeg.display()
+                     réinstaller Polyptyque ({})",
+                    plan.ffmpeg.display(),
+                    format!("{e:#}")
                 )),
-                Err(e) => PartEnd::Crashed(format!("démarrage de l'encodeur impossible : {e:#}")),
+                Err(e) => PartEnd::Crashed(tr!("démarrage de l'encodeur impossible : {}", format!("{e:#}"))),
             };
             let nothing_written = match std::fs::metadata(&output) {
                 Ok(meta) => meta.len() == 0,
@@ -162,24 +164,23 @@ impl OutputTask {
                 && (refused || quick_failures >= MAX_QUICK_FAILURES);
             if switch {
                 let note = if refused {
-                    "Limite d'encodages simultanés de la carte NVIDIA atteinte (autres logiciels compris) : \
-                     cette source passe sur le processeur"
-                        .to_string()
+                    tr!("Limite d'encodages simultanés de la carte NVIDIA atteinte (autres logiciels compris) : \
+                         cette source passe sur le processeur")
                 } else {
-                    format!("{} ne démarre pas : cette source passe sur le processeur", plan.encoder.kind.label())
+                    tr!("{} ne démarre pas : cette source passe sur le processeur", plan.encoder.kind.label())
                 };
                 log::warn!("[{}] {note} ({reason})", plan.title);
                 plan.encoder = EncoderChoice { kind: EncoderKind::Software, codec: plan.encoder.codec };
                 quick_failures = 0;
                 part += 1;
-                shared.note_error(format!("{note}. Suite dans la partie {part}"));
+                shared.note_error(tr!("{}. Suite dans la partie {}", note, part));
             } else if quick_failures >= MAX_QUICK_FAILURES {
-                shared.fail(format!("l'encodeur s'arrête dès son démarrage : {reason}"));
+                shared.fail(tr!("l'encodeur s'arrête dès son démarrage : {}", reason));
                 return;
             } else {
                 part += 1;
                 log::warn!("[{}] {reason} ; relance dans un nouveau fichier (partie {part})", plan.title);
-                shared.note_error(format!("Encodeur relancé : la suite est dans la partie {part}"));
+                shared.note_error(tr!("Encodeur relancé : la suite est dans la partie {}", part));
             }
             // Courte pause, plus longue si les échecs se répètent.
             let resume_at = Instant::now() + Duration::from_secs(quick_failures as u64);
@@ -266,7 +267,7 @@ impl Part {
         let title = if part == 1 {
             plan.title.clone()
         } else {
-            format!("{} · partie {part} (reprise à {})", plan.title, clock(streams.resume_seconds))
+            tr!("{} · partie {} (reprise à {})", plan.title, part, clock(streams.resume_seconds))
         };
         let args = match &video {
             Some((_, video_path, _)) => recording_args(&RecordingSpec {
@@ -297,13 +298,13 @@ impl Part {
             .create(true)
             .append(true)
             .open(&plan.log)
-            .with_context(|| format!("ouverture de {}", plan.log.display()))?;
+            .with_context(|| tr!("ouverture de {}", plan.log.display()))?;
         writeln!(log, "--- partie {part} ---\n{} {}", plan.ffmpeg.display(), args.join(" "))?;
         log.flush()?;
         let mut command = Command::new(&plan.ffmpeg);
         command.args(&args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::from(log));
         platform.prepare_encoder_process(&mut command);
-        let child = command.spawn().with_context(|| format!("lancement de {}", plan.ffmpeg.display()))?;
+        let child = command.spawn().with_context(|| tr!("lancement de {}", plan.ffmpeg.display()))?;
 
         let mut running = Part { child, writers: Vec::new(), control: Arc::new(PartControl::default()) };
         let spawn_all = || -> std::io::Result<()> {
@@ -356,12 +357,12 @@ impl Part {
                     // Les tubes ne passent plus : l'encodeur est hors service.
                     let _ = self.child.kill();
                     let status = self.child.wait().map(|s| s.to_string()).unwrap_or_default();
-                    return PartEnd::Crashed(format!("l'encodeur s'est arrêté ({status}) : {}", log_tail(log)));
+                    return PartEnd::Crashed(tr!("l'encodeur s'est arrêté ({}) : {}", status, log_tail(log)));
                 }
                 // Flux fermés : FFmpeg termine le fichier.
                 return match wait_exit(&mut self.child, FINALIZE_TIMEOUT) {
                     Some(status) if !status.success() && !stopping(shared) => {
-                        PartEnd::Crashed(format!("l'encodeur s'est arrêté ({status}) : {}", log_tail(log)))
+                        PartEnd::Crashed(tr!("l'encodeur s'est arrêté ({}) : {}", status, log_tail(log)))
                     }
                     _ => PartEnd::Closed,
                 };
@@ -371,9 +372,9 @@ impl Part {
                 // d'écriture sont débloqués et la partie est abandonnée.
                 self.abandon_writers();
                 let reason = if stalled {
-                    "l'encodeur ne répondait plus".to_string()
+                    tr!("l'encodeur ne répondait plus")
                 } else {
-                    format!("l'encodeur s'est arrêté ({status}) : {}", log_tail(log))
+                    tr!("l'encodeur s'est arrêté ({}) : {}", status, log_tail(log))
                 };
                 return if stopping(shared) && !stalled { PartEnd::Closed } else { PartEnd::Crashed(reason) };
             }
@@ -438,11 +439,8 @@ fn next_part_path(plan: &OutputPlan, shared: &Shared, part: u32) -> PathBuf {
     if storage::dir_writable(dir) || !storage::dir_writable(&plan.fallback_dir) {
         return part_path(&plan.first_output, dir, part);
     }
-    let message = format!(
-        "Dossier {} inaccessible : la suite est enregistrée dans {}",
-        dir.display(),
-        plan.fallback_dir.display()
-    );
+    let message =
+        tr!("Dossier {} inaccessible : la suite est enregistrée dans {}", dir.display(), plan.fallback_dir.display());
     log::warn!("[{}] {message}", plan.title);
     shared.note_error(message);
     part_path(&plan.first_output, &plan.fallback_dir, part)
@@ -451,7 +449,7 @@ fn next_part_path(plan: &OutputPlan, shared: &Shared, part: u32) -> PathBuf {
 fn part_path(first: &Path, dir: &Path, part: u32) -> PathBuf {
     let stem = first.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
     let ext = first.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_else(|| "mkv".into());
-    naming::unique_path(dir, &format!("{stem}_partie{part}"), &ext, &Default::default())
+    naming::unique_path(dir, &tr!("{}_partie{}", stem, part), &ext, &Default::default())
 }
 
 /// Point de reprise commun à l'image et au son après une relance : le plus
@@ -504,7 +502,7 @@ pub(crate) fn log_tail(path: &Path) -> String {
     let tail = lines[lines.len().saturating_sub(3)..].join(" | ");
     let mut tail: String = tail.chars().take(400).collect();
     if tail.is_empty() {
-        tail = "journal vide".into();
+        tail = tr!("journal vide");
     }
     tail
 }

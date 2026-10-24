@@ -6,20 +6,21 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result};
+use tr::tr;
 
 /// Écrit `data` dans `path` sans jamais laisser un fichier à moitié écrit :
 /// fichier temporaire forcé sur le disque, puis renommage. Une coupure de
 /// courant laisse soit l'ancien contenu, soit le nouveau.
 pub fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
     if let Some(dir) = path.parent() {
-        fs::create_dir_all(dir).with_context(|| format!("création du dossier {}", dir.display()))?;
+        fs::create_dir_all(dir).with_context(|| tr!("création du dossier {}", dir.display()))?;
     }
     let tmp = sibling(path, ".tmp");
-    let mut file = File::create(&tmp).with_context(|| format!("écriture de {}", tmp.display()))?;
-    file.write_all(data).with_context(|| format!("écriture de {}", tmp.display()))?;
-    file.sync_all().with_context(|| format!("écriture sur le disque de {}", tmp.display()))?;
+    let mut file = File::create(&tmp).with_context(|| tr!("écriture de {}", tmp.display()))?;
+    file.write_all(data).with_context(|| tr!("écriture de {}", tmp.display()))?;
+    file.sync_all().with_context(|| tr!("écriture sur le disque de {}", tmp.display()))?;
     drop(file);
-    fs::rename(&tmp, path).with_context(|| format!("remplacement de {}", path.display()))?;
+    fs::rename(&tmp, path).with_context(|| tr!("remplacement de {}", path.display()))?;
     Ok(())
 }
 

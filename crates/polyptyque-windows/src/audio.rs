@@ -27,28 +27,29 @@ impl WasapiCapture {
     pub fn process(pid: u32, sample_rate: u32, channels: u16) -> Result<Self> {
         let _ = wasapi::initialize_mta();
         let client = AudioClient::new_application_loopback_client(pid, true)
-            .with_context(|| format!("activation de la capture audio du processus {pid}"))?;
-        Self::start(client, sample_rate, channels).map_err(|e| anyhow!("initialisation de la capture audio : {e}"))
+            .with_context(|| tr::tr!("activation de la capture audio du processus {}", pid))?;
+        Self::start(client, sample_rate, channels)
+            .map_err(|e| anyhow!(tr::tr!("initialisation de la capture audio : {}", e)))
     }
 
     /// Son d'un micro (`None` : le micro par défaut de Windows).
     pub fn microphone(device_id: Option<&str>, sample_rate: u32, channels: u16) -> Result<Self> {
         let _ = wasapi::initialize_mta();
-        let enumerator = DeviceEnumerator::new().context("liste des périphériques audio")?;
+        let enumerator = DeviceEnumerator::new().context(tr::tr!("liste des périphériques audio"))?;
         let device = match device_id {
-            Some(id) => enumerator.get_device(id).context("micro introuvable (débranché ?)")?,
-            None => {
-                enumerator.get_default_device(&Direction::Capture).context("aucun micro par défaut dans Windows")?
-            }
+            Some(id) => enumerator.get_device(id).context(tr::tr!("micro introuvable (débranché ?)"))?,
+            None => enumerator
+                .get_default_device(&Direction::Capture)
+                .context(tr::tr!("aucun micro par défaut dans Windows"))?,
         };
-        let client = device.get_iaudioclient().context("ouverture du micro")?;
+        let client = device.get_iaudioclient().context(tr::tr!("ouverture du micro"))?;
         Self::start(client, sample_rate, channels).map_err(|e| {
             if access_denied(&e) {
-                anyhow!(
+                anyhow!(tr::tr!(
                     "Windows refuse l'accès au micro. Autorise-le dans Paramètres > Confidentialité et sécurité > Microphone (accès au micro, et accès pour les applications de bureau)."
-                )
+                ))
             } else {
-                anyhow!("micro inutilisable : {e}")
+                anyhow!(tr::tr!("micro inutilisable : {}", e))
             }
         })
     }

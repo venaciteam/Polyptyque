@@ -12,6 +12,7 @@ chrono.workspace = true
 directories.workspace = true
 serde.workspace = true
 toml.workspace = true
+tr.workspace = true
 
 [dev-dependencies]
 # Fuseau Europe/Paris réel, pour vérifier les changements d'heure.

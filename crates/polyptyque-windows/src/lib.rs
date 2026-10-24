@@ -33,6 +33,14 @@ pub fn keep_awake_for_schedules(on: bool) {
     system::keep_awake_for_schedules(on);
 }
 
+/// Langue des messages propres à Windows (voir [`polyptyque_core::i18n`]).
+pub fn set_catalog(catalog: Option<std::sync::Arc<polyptyque_core::i18n::Catalog>>) {
+    match catalog {
+        Some(catalog) => tr::set_translator!(catalog),
+        None => tr::set_translator!(polyptyque_core::i18n::French),
+    }
+}
+
 /// Pas de fenêtre de console pour FFmpeg.
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 /// FFmpeg ne reçoit pas le Ctrl+C de la console : c'est Polyptyque qui
