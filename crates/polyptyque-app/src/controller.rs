@@ -72,7 +72,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Raison affichée par Windows si l'on éteint pendant un enregistrement.
 #[cfg(windows)]
 fn shutdown_reason() -> String {
-    tr!("Enregistrement en cours : arrête-le dans Polyptyque pour finaliser les fichiers.")
+    tr!("Enregistrement en cours : l'arrêter dans Polyptyque pour finaliser les fichiers.")
 }
 
 const RESOLUTIONS: [(u32, u32); 4] = [(1280, 720), (1920, 1080), (2560, 1440), (3840, 2160)];
@@ -1065,7 +1065,7 @@ impl App {
             sources.retain(|s| s.id == id);
         }
         if sources.is_empty() {
-            self.toast(&tr!("Ajoute d'abord au moins une source à cette scène."), 2);
+            self.toast(&tr!("Ajouter d'abord au moins une source à cette scène."), 2);
             self.flush_pending_repairs();
             return;
         }
@@ -1722,7 +1722,7 @@ impl App {
                 };
                 format!("{cause} {files}")
             }
-            None => tr!("Polyptyque s'est fermé pendant un enregistrement, mais son journal est illisible : vérifie les fichiers dans le dossier d'enregistrement."),
+            None => tr!("Polyptyque s'est fermé pendant un enregistrement, mais son journal est illisible : vérifier les fichiers dans le dossier d'enregistrement."),
         };
         let files: Vec<IncidentFile> = reports
             .iter()
@@ -1802,7 +1802,7 @@ impl App {
                 *self.update.borrow_mut() = Some(available);
                 self.set_update_state(UpdateState::Available);
                 self.toast(
-                    &tr!("Polyptyque {} est disponible : clique sur la pastille en haut pour l'installer.", version),
+                    &tr!("Polyptyque {} est disponible : un clic sur la pastille en haut l'installe.", version),
                     1,
                 );
             }
@@ -1895,7 +1895,7 @@ impl App {
                 match self.update_blocked() {
                     None => self.apply_update(),
                     Some(_) => self.toast(
-                        &tr!("Mise à jour téléchargée : clique sur la pastille une fois l'enregistrement terminé, ou elle s'installera au prochain démarrage."),
+                        &tr!("Mise à jour téléchargée : un clic sur la pastille l'installe une fois l'enregistrement terminé ; sinon, elle s'installera au prochain démarrage."),
                         1,
                     ),
                 }
@@ -1974,7 +1974,7 @@ impl App {
         match (count, skipped) {
             (0, 0) => {}
             (0, _) => self.toast(
-                &tr!("Ces fichiers sont en cours d'enregistrement : convertis-les une fois l'enregistrement arrêté."),
+                &tr!("Ces fichiers sont en cours d'enregistrement : ils pourront être convertis une fois l'enregistrement arrêté."),
                 2,
             ),
             (_, 0) => self.toast(&added_to_conversion(count), 1),
@@ -2198,7 +2198,7 @@ impl App {
         let bridge = ui.global::<Bridge>();
         let name = bridge.get_scene_name_input().trim().to_string();
         if name.is_empty() {
-            self.toast(&tr!("Indique un nom de scène."), 2);
+            self.toast(&tr!("Nom de scène manquant."), 2);
             return;
         }
         let mode = bridge.get_sheet();
@@ -2317,7 +2317,7 @@ impl App {
             }
         };
         if bridge.get_new_name().trim().is_empty() {
-            self.toast(&tr!("Indique un nom pour cette source."), 2);
+            self.toast(&tr!("Nom de source manquant."), 2);
             return;
         }
         let url = bridge.get_new_url().to_string();
@@ -2336,8 +2336,13 @@ impl App {
         self.restart_previews();
         if open_now {
             match resolve::launch(&source) {
-                Ok(()) => self
-                    .toast(&tr!("« {} » ajoutée. Connecte-toi et prépare tes onglets : tout sera conservé.", name), 1),
+                Ok(()) => self.toast(
+                    &tr!(
+                        "« {} » ajoutée : les connexions et les onglets préparés dans ce navigateur seront conservés.",
+                        name
+                    ),
+                    1,
+                ),
                 Err(e) => self
                     .toast(&tr!("« {} » ajoutée, mais le navigateur ne s'ouvre pas : {}", name, format!("{e:#}")), 3),
             }
@@ -2398,7 +2403,7 @@ impl App {
             return;
         };
         if bridge.get_new_name().trim().is_empty() {
-            self.toast(&tr!("Indique un nom pour cette source."), 2);
+            self.toast(&tr!("Nom de source manquant."), 2);
             return;
         }
         let source =
@@ -2464,7 +2469,7 @@ impl App {
         *self.copied_source.borrow_mut() = Some(source.id.clone());
         let can_paste = self.can_paste();
         self.with_bridge(|b| b.set_can_paste(can_paste));
-        self.toast(&tr!("« {} » copiée : colle-la dans une autre scène avec Ctrl+V.", source.name), 1);
+        self.toast(&tr!("« {} » copiée, prête à être collée dans une autre scène (Ctrl+V).", source.name), 1);
     }
 
     /// La source copiée existe encore et n'est pas déjà dans la scène active
@@ -2481,14 +2486,14 @@ impl App {
     /// fenêtre, même profil de navigateur), pas une copie.
     fn paste_source(&self) {
         if self.recording() {
-            self.toast(&tr!("Arrête l'enregistrement pour coller une source."), 2);
+            self.toast(&tr!("Impossible de coller une source pendant un enregistrement."), 2);
             return;
         }
         if self.busy.get() {
             return;
         }
         let Some(id) = self.copied_source.borrow().clone() else {
-            self.toast(&tr!("Copie d'abord une source (Ctrl+C), puis colle-la ici (Ctrl+V)."), 2);
+            self.toast(&tr!("Copier d'abord une source (Ctrl+C), puis la coller ici (Ctrl+V)."), 2);
             return;
         };
         let result = self.config.borrow_mut().paste_source(&id);
@@ -2547,7 +2552,10 @@ impl App {
         };
         if let SourceKind::Application { exe_path, .. } = &source.kind {
             if !exe_path.exists() {
-                self.toast(&tr!("Programme introuvable ({}) : ouvre la fenêtre toi-même.", exe_path.display()), 2);
+                self.toast(
+                    &tr!("Programme introuvable ({}) : la fenêtre est à ouvrir à la main.", exe_path.display()),
+                    2,
+                );
                 return;
             }
         }
@@ -2555,7 +2563,7 @@ impl App {
             Ok(true) => self.toast(&tr!("Ouverture de « {} »…", source.name), 1),
             Ok(false) => self.toast(
                 &tr!(
-                    "« {} » est déjà en train de s'ouvrir (ou de se fermer) : patiente quelques secondes.",
+                    "« {} » est déjà en train de s'ouvrir (ou de se fermer) : patienter quelques secondes.",
                     source.name
                 ),
                 2,
@@ -2818,13 +2826,15 @@ impl App {
         let bitrate: u32 = match b.get_bitrate_text().trim().replace([' ', '\u{a0}'], "").parse() {
             Ok(value) if (250..=500_000).contains(&value) => value,
             _ => {
-                b.set_settings_error(tr!("Débit vidéo invalide : indique un nombre entre 250 et 500 000 kb/s.").into());
+                b.set_settings_error(
+                    tr!("Débit vidéo invalide : un nombre entre 250 et 500 000 kb/s est attendu.").into(),
+                );
                 return;
             }
         };
         let output_dir = b.get_output_dir().trim().trim_matches('"').to_string();
         if output_dir.is_empty() {
-            b.set_settings_error(tr!("Indique un dossier pour les enregistrements.").into());
+            b.set_settings_error(tr!("Dossier des enregistrements manquant.").into());
             return;
         }
         let choices: Vec<String> = b.get_hotkey_choices().iter().map(|c| c.to_string()).collect();
@@ -3076,7 +3086,7 @@ impl App {
             self.ask(
                 Confirm::QuitWhileConverting,
                 &tr!("Conversion en cours"),
-                &tr!("Quitter maintenant interrompt la conversion MP4. Les fichiers MKV d'origine sont conservés : tu pourras les convertir plus tard."),
+                &tr!("Quitter maintenant interrompt la conversion MP4. Les fichiers MKV d'origine sont conservés : ils pourront être convertis plus tard."),
                 &tr!("Quitter quand même"),
             );
             return CloseRequestResponse::KeepWindowShown;
@@ -3329,7 +3339,7 @@ fn prepare(platform: &dyn Platform, config: &Config, sources: &[Source]) -> Resu
     let video = &config.settings.video;
     let encoder = probe::select_encoder(platform, &ffmpeg, video.hardware, video.codec).ok_or_else(|| {
         anyhow!(tr!(
-            "aucun encodeur {} utilisable avec le réglage « {} ». Essaie un autre matériel ou le format H.264.",
+            "aucun encodeur {} utilisable avec le réglage « {} ». Essayer un autre matériel ou le format H.264.",
             video.codec.label(),
             video.hardware.label()
         ))

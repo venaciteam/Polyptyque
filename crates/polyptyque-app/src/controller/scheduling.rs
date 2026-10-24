@@ -202,7 +202,7 @@ impl App {
                     "auto-stop",
                     tr!("Créneau programmé en cours"),
                     tr!(
-                        "Tu es dans le créneau d'enregistrement « {} », qui se termine à {end}. Arrêter automatiquement cet enregistrement à {end} ?",
+                        "Le créneau d'enregistrement « {} » est en cours et se termine à {end}. Arrêter automatiquement cet enregistrement à {end} ?",
                         self.slot_scene(slot),
                         end
                     ),
@@ -349,7 +349,7 @@ impl App {
                 Confirm::StopScheduled,
                 &tr!("Créneau d'enregistrement en cours"),
                 &tr!(
-                    "Tu es dans un créneau d'enregistrement programmé (« {} », jusqu'à {}). L'arrêter quand même ? Il ne sera pas relancé avant le prochain créneau.",
+                    "Un créneau d'enregistrement programmé est en cours (« {} », jusqu'à {}). L'arrêter quand même ? Il ne sera pas relancé avant le prochain créneau.",
                     self.slot_scene(&slot),
                     clock_label(slot.end, &Local)
                 ),
@@ -461,10 +461,10 @@ impl App {
         let enabled = self.config.borrow().settings.launch_at_startup;
         #[cfg(windows)]
         if enabled && polyptyque_windows::startup::blocked_by_windows() {
-            return tr!("Windows empêche ce lancement (désactivé dans Paramètres > Applications > Démarrage) : réactive-le là-bas, ou coupe puis remets cette option.");
+            return tr!("Windows empêche ce lancement (désactivé dans Paramètres > Applications > Démarrage) : le réactiver là-bas, ou couper puis remettre cette option.");
         }
         if enabled && polyptyque_core::paths::portable_root().is_some() {
-            return tr!("Version portable : ce lancement est inscrit dans Windows. Coupe l'option avant d'emporter le dossier sur un autre PC.");
+            return tr!("Version portable : ce lancement est inscrit dans Windows. Couper l'option avant d'emporter le dossier sur un autre PC.");
         }
         String::new()
     }
@@ -667,15 +667,15 @@ impl App {
         let Some(scene_id) =
             self.schedule_scene_ids.borrow().get(b.get_schedule_scene_index().max(0) as usize).cloned()
         else {
-            fail(&tr!("Choisis une scène."));
+            fail(&tr!("Aucune scène choisie."));
             return;
         };
         let Some(start) = TimeOfDay::parse(&b.get_schedule_start()) else {
-            fail(&tr!("Heure de début invalide : écris-la par exemple 21:00."));
+            fail(&tr!("Heure de début invalide (exemple : 21:00)."));
             return;
         };
         let Some(end) = TimeOfDay::parse(&b.get_schedule_end()) else {
-            fail(&tr!("Heure de fin invalide : écris-la par exemple 22:30."));
+            fail(&tr!("Heure de fin invalide (exemple : 22:30)."));
             return;
         };
         let now = Utc::now();
@@ -684,7 +684,7 @@ impl App {
             REPEAT_ONCE => match parse_date(&b.get_schedule_date(), today) {
                 Some(date) => Repeat::Once { date },
                 None => {
-                    fail(&tr!("Date invalide : écris-la par exemple 25/10/2026."));
+                    fail(&tr!("Date invalide (exemple : 25/10/2026)."));
                     return;
                 }
             },
@@ -779,8 +779,8 @@ impl App {
     fn schedule_error_text(&self, error: &ScheduleError) -> String {
         match error {
             ScheduleError::SameTimes => tr!("l'heure de fin doit être différente de l'heure de début."),
-            ScheduleError::NoDay => tr!("choisis au moins un jour."),
-            ScheduleError::InPast => tr!("ce créneau est déjà passé : choisis une autre date ou une autre heure."),
+            ScheduleError::NoDay => tr!("aucun jour choisi."),
+            ScheduleError::InPast => tr!("ce créneau est déjà passé : choisir une autre date ou une autre heure."),
             ScheduleError::Overlap(id) => {
                 let config = self.config.borrow();
                 match config.schedules.iter().find(|s| s.id == *id) {

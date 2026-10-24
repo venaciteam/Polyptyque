@@ -46,7 +46,7 @@ impl WasapiCapture {
         Self::start(client, sample_rate, channels).map_err(|e| {
             if access_denied(&e) {
                 anyhow!(tr::tr!(
-                    "Windows refuse l'accès au micro. Autorise-le dans Paramètres > Confidentialité et sécurité > Microphone (accès au micro, et accès pour les applications de bureau)."
+                    "Windows refuse l'accès au micro. L'autoriser dans Paramètres > Confidentialité et sécurité > Microphone (accès au micro, et accès pour les applications de bureau)."
                 ))
             } else {
                 anyhow!(tr::tr!("micro inutilisable : {}", e))

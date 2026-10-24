@@ -40,7 +40,7 @@ export component AddBrowserSheet inherits Sheet {
         }
     }
     CheckBox {
-        text: @tr("Ouvrir maintenant pour me connecter et préparer mes onglets");
+        text: @tr("Ouvrir maintenant pour se connecter et préparer les onglets");
         checked <=> Bridge.open-now;
     }
     Note {
@@ -107,7 +107,7 @@ export component AddApplicationSheet inherits Sheet {
     }
     if Bridge.window-index >= 0 && Bridge.window-index < Bridge.windows.length && Bridge.windows[Bridge.window-index].browser: Note {
         tone: 2;
-        text: @tr("C'est un navigateur : son son sera mélangé avec celui de toutes ses autres fenêtres. Pour isoler le son, ajoute plutôt une source navigateur.");
+        text: @tr("C'est un navigateur : son son sera mélangé avec celui de toutes ses autres fenêtres. Pour isoler le son, mieux vaut ajouter une source navigateur.");
     }
     Field {
         label: @tr("Nom de la source");
@@ -335,7 +335,7 @@ export component SettingsSheet inherits Sheet {
             Field {
                 label: @tr("Micro");
                 Toggle {
-                    text: @tr("Enregistrer mon micro dans un fichier séparé");
+                    text: @tr("Enregistrer le micro dans un fichier séparé");
                     checked: Bridge.settings-mic;
                     toggled(value) => {
                         Bridge.settings-mic = value;
@@ -358,7 +358,7 @@ export component SettingsSheet inherits Sheet {
                 Text {
                     horizontal-stretch: 1;
                     text: Bridge.mic-test-error != "" ? Bridge.mic-test-error
-                        : Bridge.mic-test-sound ? @tr("Son capté") : @tr("Aucun son capté : parle pour vérifier");
+                        : Bridge.mic-test-sound ? @tr("Son capté") : @tr("Aucun son capté : parler dans le micro pour vérifier");
                     color: Bridge.mic-test-error != "" ? Theme.warning : Theme.text-faint;
                     font-size: Theme.font-small;
                     vertical-alignment: center;
@@ -444,7 +444,7 @@ export component SettingsSheet inherits Sheet {
             }
             Field {
                 label: @tr("Conversion pour le montage");
-                hint: @tr("Copie MP4 sans perte de qualité, créée à côté du MKV, qui est conservé. Prévois le double d'espace disque.");
+                hint: @tr("Copie MP4 sans perte de qualité, créée à côté du MKV, qui est conservé. Prévoir le double d'espace disque.");
                 Toggle {
                     text: @tr("Convertir en MP4 à la fin de l'enregistrement");
                     checked: Bridge.settings-convert;
@@ -691,7 +691,7 @@ export component SchedulesSheet inherits Sheet {
     }
     Field {
         label: @tr("Démarrage de Windows");
-        hint: @tr("Sans cela, après un redémarrage de Windows (une mise à jour, par exemple), les programmations attendent que tu rouvres Polyptyque. Lancé par Windows, il démarre réduit, sans ouvrir les fenêtres de la scène.");
+        hint: @tr("Sans cela, après un redémarrage de Windows (une mise à jour, par exemple), les programmations attendent la réouverture de Polyptyque. Lancé par Windows, il démarre réduit, sans ouvrir les fenêtres de la scène.");
         Toggle {
             text: @tr("Lancer Polyptyque au démarrage de Windows");
             checked: Bridge.startup-enabled;
