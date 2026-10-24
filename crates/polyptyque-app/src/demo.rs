@@ -223,6 +223,27 @@ impl Platform for DemoPlatform {
     fn free_disk_space(&self, _: &Path) -> Option<u64> {
         Some(412_300_000_000)
     }
+
+    fn os_description(&self) -> String {
+        format!("{} (démonstration)", std::env::consts::OS)
+    }
+
+    fn graphics_adapters(&self) -> Vec<String> {
+        vec!["Carte graphique de démonstration".into()]
+    }
+
+    /// Démonstration : rien ne s'ouvre, l'action est seulement affichée.
+    fn shell_open(&self, target: &str) -> Result<()> {
+        log::info!("démo : ouverture de {target}");
+        println!("démo : ouverture de {target}");
+        Ok(())
+    }
+
+    fn reveal_file(&self, path: &Path) -> Result<()> {
+        log::info!("démo : fichier montré : {}", path.display());
+        println!("démo : fichier montré : {}", path.display());
+        Ok(())
+    }
 }
 
 /// Image animée : dégradé teinté et barre lumineuse qui défile.

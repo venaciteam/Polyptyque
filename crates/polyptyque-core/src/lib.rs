@@ -16,6 +16,7 @@ pub mod naming;
 pub mod paths;
 pub mod platform;
 pub mod recovery;
+pub mod report;
 pub mod schedule;
 pub mod storage;
 pub mod timeline;

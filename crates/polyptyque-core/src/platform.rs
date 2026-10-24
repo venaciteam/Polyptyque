@@ -132,4 +132,26 @@ pub trait Platform: Send + Sync {
     fn end_recording_session(&self);
 
     fn free_disk_space(&self, path: &Path) -> Option<u64>;
+
+    /// Système, pour un rapport de problème : « Windows 11 Pro 24H2 (build
+    /// 26100.2033) ».
+    fn os_description(&self) -> String {
+        std::env::consts::OS.to_string()
+    }
+
+    /// Cartes graphiques, pour un rapport de problème.
+    fn graphics_adapters(&self) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// Ouvre une adresse web dans le navigateur par défaut, ou un fichier
+    /// avec son programme habituel.
+    fn shell_open(&self, _target: &str) -> anyhow::Result<()> {
+        anyhow::bail!(tr::tr!("non disponible sur ce système"))
+    }
+
+    /// Montre un fichier dans le gestionnaire de fichiers, sélectionné.
+    fn reveal_file(&self, _path: &Path) -> anyhow::Result<()> {
+        anyhow::bail!(tr::tr!("non disponible sur ce système"))
+    }
 }

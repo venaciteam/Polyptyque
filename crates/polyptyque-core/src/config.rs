@@ -69,7 +69,9 @@ impl Config {
                 Err(e) => {
                     let damaged = storage::sibling(path, ".invalide");
                     let _ = fs::copy(path, &damaged);
-                    tr!("Réglages abîmés ({}). Une copie a été gardée dans {}.", format!("{e:#}"), damaged.display())
+                    // Erreur du lecteur de réglages, en anglais : au journal.
+                    log::warn!("réglages abîmés : {e:#}");
+                    tr!("Réglages abîmés (détail dans le journal). Une copie a été gardée dans {}.", damaged.display())
                 }
             },
             Err(e) if e.kind() == ErrorKind::NotFound => return (Config::default(), None),

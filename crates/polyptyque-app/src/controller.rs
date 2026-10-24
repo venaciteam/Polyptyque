@@ -44,6 +44,7 @@ use crate::preview::{self, PreviewManager, PreviewState};
 use crate::update;
 use crate::{AppWindow, Bridge, IncidentFile, SceneItem, ScheduleItem, SourceCard, SourceItem, WindowItem};
 
+mod report;
 mod scheduling;
 use scheduling::Prompt;
 
@@ -210,6 +211,8 @@ pub struct App {
     mic_choices: RefCell<Vec<(String, String)>>,
     /// Un problème de micro a déjà été signalé pendant cet enregistrement.
     mic_warned: Cell<bool>,
+    /// Signalement d'un problème en cours.
+    report: RefCell<report::ReportState>,
     /// Nouvelle version trouvée, et où en est son installation.
     update: RefCell<Option<update::Available>>,
     update_state: Cell<UpdateState>,
@@ -361,6 +364,7 @@ pub fn run(platform: Arc<dyn Platform>, paths: Paths, initial: Option<Config>, a
         copied_source: RefCell::new(None),
         mic_choices: RefCell::new(Vec::new()),
         mic_warned: Cell::new(false),
+        report: RefCell::new(report::ReportState::default()),
         update: RefCell::new(None),
         update_state: Cell::new(UpdateState::None),
         update_checking: Cell::new(false),
@@ -536,6 +540,18 @@ fn install_callbacks(ui: &AppWindow) {
     });
     b.on_incident_resume(|| {
         with_app(|a| a.incident_resume());
+    });
+    b.on_request_report(|from_incident| {
+        with_app(|a| a.request_report(from_incident));
+    });
+    b.on_prepare_report(|| {
+        with_app(|a| a.prepare_report());
+    });
+    b.on_open_report(|| {
+        with_app(|a| a.open_report());
+    });
+    b.on_open_report_page(|| {
+        with_app(|a| a.open_report_page());
     });
     b.on_toggle_source(|id| {
         with_app(|a| a.toggle_source(&id));
@@ -1903,7 +1919,7 @@ impl App {
             Err(e) => {
                 log::warn!("téléchargement de la mise à jour : {e:#}");
                 self.set_update_state(UpdateState::Available);
-                self.toast(&tr!("Téléchargement de la mise à jour impossible : {}", format!("{e:#}")), 3);
+                self.toast(&tr!("Téléchargement de la mise à jour impossible (détail dans le journal)."), 3);
             }
         }
     }
@@ -1921,7 +1937,7 @@ impl App {
         self.previews.borrow_mut().stop();
         if let Err(e) = update::apply(&available) {
             log::warn!("installation de la mise à jour : {e:#}");
-            self.toast(&tr!("Installation de la mise à jour impossible : {}", format!("{e:#}")), 3);
+            self.toast(&tr!("Installation de la mise à jour impossible (détail dans le journal)."), 3);
         }
     }
 
@@ -2948,6 +2964,10 @@ impl App {
     // ----- Fenêtres modales et confirmations --------------------------------
 
     fn close_sheet(&self) {
+        // Signalement ouvert depuis le bilan d'incident : retour au bilan.
+        if self.report_closing() {
+            return;
+        }
         self.confirm.borrow_mut().take();
         self.quit_with_schedules.set(false);
         if self.incident.borrow_mut().take().is_some() {

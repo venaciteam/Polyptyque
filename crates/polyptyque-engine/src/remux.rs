@@ -58,7 +58,8 @@ pub fn inspect(platform: &dyn Platform, ffmpeg: &Path, path: &Path) -> Result<Me
     let text = String::from_utf8_lossy(&output.stderr);
     let info = parse_media_info(&text);
     if info.video_streams == 0 && info.audio_streams == 0 {
-        bail!(tr!("fichier illisible : {}", last_line(&text)));
+        log::warn!("FFmpeg ne lit pas {} : {}", path.display(), last_line(&text));
+        bail!(tr!("FFmpeg ne peut pas le lire (détail dans le journal)"));
     }
     Ok(info)
 }
@@ -219,7 +220,8 @@ fn remux_file(
     let result = if cancelled || cancel.load(Ordering::Relaxed) {
         Err(anyhow::anyhow!(tr!("annulé")))
     } else if !status.success() {
-        Err(anyhow::anyhow!(tr!("échec de FFmpeg ({}) : {}", status, last_line(&errors))))
+        log::warn!("échec de FFmpeg ({status}) : {}", last_line(&errors));
+        Err(anyhow::anyhow!(tr!("échec de FFmpeg (détail dans le journal)")))
     } else {
         inspect(platform, ffmpeg, &partial)
             .and_then(|copy| verify(&source, &copy))
@@ -330,8 +332,7 @@ fn extension(path: &Path) -> Option<String> {
 }
 
 fn last_line(text: &str) -> String {
-    let fallback = tr!("aucun détail");
-    let line = text.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or(&fallback).trim();
+    let line = text.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("aucun détail").trim();
     line.chars().take(300).collect()
 }
 

@@ -39,8 +39,9 @@ pub fn dir_writable(dir: &Path) -> bool {
 /// Durée de conservation des journaux.
 pub const LOG_RETENTION: Duration = Duration::from_secs(30 * 24 * 3600);
 
-/// Efface les journaux de Polyptyque (`polyptyque_….log` et dossiers
-/// `session_…`) plus anciens que `max_age`. Rien d'autre n'est touché.
+/// Efface les journaux de Polyptyque (`polyptyque_….log`, dossiers
+/// `session_…` et rapports de problème `rapport_….txt` ou `report_….txt`) plus anciens que
+/// `max_age`. Rien d'autre n'est touché.
 /// Renvoie le nombre d'éléments effacés.
 pub fn prune_old_logs(dir: &Path, max_age: Duration) -> usize {
     let Ok(entries) = fs::read_dir(dir) else {
@@ -54,6 +55,9 @@ pub fn prune_old_logs(dir: &Path, max_age: Duration) -> usize {
             continue;
         };
         let ours = (meta.is_file() && name.starts_with("polyptyque_") && name.ends_with(".log"))
+            || (meta.is_file()
+                && crate::report::FILE_PREFIXES.iter().any(|p| name.starts_with(p))
+                && name.ends_with(".txt"))
             || (meta.is_dir() && name.starts_with("session_"));
         let old = meta.modified().ok().and_then(|m| now.duration_since(m).ok()).is_some_and(|age| age > max_age);
         if !ours || !old {

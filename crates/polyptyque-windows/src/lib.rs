@@ -15,6 +15,7 @@ pub mod session_end;
 pub mod single_instance;
 pub mod startup;
 mod system;
+mod system_info;
 mod video;
 mod windows_list;
 
@@ -141,5 +142,21 @@ impl Platform for WindowsPlatform {
 
     fn free_disk_space(&self, path: &Path) -> Option<u64> {
         system::free_space(path)
+    }
+
+    fn os_description(&self) -> String {
+        system_info::os_description()
+    }
+
+    fn graphics_adapters(&self) -> Vec<String> {
+        system_info::graphics_adapters()
+    }
+
+    fn shell_open(&self, target: &str) -> anyhow::Result<()> {
+        system_info::shell_open(target)
+    }
+
+    fn reveal_file(&self, path: &Path) -> anyhow::Result<()> {
+        system_info::reveal_file(path)
     }
 }

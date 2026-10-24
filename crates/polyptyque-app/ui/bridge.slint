@@ -245,6 +245,14 @@ export global Bridge {
     in property <bool> incident-can-resume;
     callback incident-repair();
     callback incident-resume();
+    // Signalement d'un problème : chemin du rapport une fois préparé (vide
+    // avant).
+    in property <string> report-path;
+    in property <string> report-name;
+    callback request-report(bool);
+    callback prepare-report();
+    callback open-report();
+    callback open-report-page();
     // Démarre ou arrête l'enregistrement d'une seule source.
     callback toggle-source(string);
     callback open-settings();

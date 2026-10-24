@@ -80,7 +80,31 @@ enum PartEnd {
     /// Fichier fermé normalement (arrêt demandé).
     Closed,
     /// L'encodeur s'est arrêté ou figé pendant l'enregistrement.
-    Crashed(String),
+    Crashed(Crash),
+}
+
+/// Arrêt de l'encodeur : ce qui est affiché, et le détail pour le journal
+/// (code de sortie, fin du journal de FFmpeg, en anglais), qui sert aussi à
+/// reconnaître la cause.
+struct Crash {
+    shown: String,
+    detail: String,
+}
+
+impl Crash {
+    /// Même texte affiché et journalisé (message déjà dans la langue de
+    /// l'interface, ou de Windows).
+    fn plain(text: String) -> Self {
+        Self { detail: text.clone(), shown: text }
+    }
+
+    /// FFmpeg arrêté : le détail reste au journal.
+    fn stopped(status: impl std::fmt::Display, log: &Path) -> Self {
+        Self {
+            shown: tr!("l'encodeur s'est arrêté (détail dans le journal)"),
+            detail: format!("l'encodeur s'est arrêté ({status}) : {}", log_tail(log)),
+        }
+    }
 }
 
 impl OutputTask {
@@ -123,13 +147,15 @@ impl OutputTask {
             let streams = Streams { video: video.as_ref(), audio: &audio, video_start, audio_start, resume_seconds };
             let end = match Part::start(platform.as_ref(), &plan, &shared, &output, part, streams) {
                 Ok(running) => running.supervise(&shared, &plan.log),
-                Err(e) if plan.ffmpeg.is_absolute() && !plan.ffmpeg.exists() => PartEnd::Crashed(tr!(
+                Err(e) if plan.ffmpeg.is_absolute() && !plan.ffmpeg.exists() => PartEnd::Crashed(Crash::plain(tr!(
                     "FFmpeg a disparu ({}) : un antivirus l'a peut-être mis en quarantaine ; le restaurer, ou \
                      réinstaller Polyptyque ({})",
                     plan.ffmpeg.display(),
                     format!("{e:#}")
-                )),
-                Err(e) => PartEnd::Crashed(tr!("démarrage de l'encodeur impossible : {}", format!("{e:#}"))),
+                ))),
+                Err(e) => {
+                    PartEnd::Crashed(Crash::plain(tr!("démarrage de l'encodeur impossible : {}", format!("{e:#}"))))
+                }
             };
             let nothing_written = match std::fs::metadata(&output) {
                 Ok(meta) => meta.len() == 0,
@@ -143,9 +169,9 @@ impl OutputTask {
                 let _ = std::fs::remove_file(&output);
                 shared.remove_output(&output);
             }
-            let reason = match end {
+            let (shown, reason) = match end {
                 PartEnd::Closed => return,
-                PartEnd::Crashed(reason) => reason,
+                PartEnd::Crashed(crash) => (crash.shown, crash.detail),
             };
             if stopping(&shared) {
                 log::warn!("[{}] encodeur arrêté pendant la finalisation : {reason}", plan.title);
@@ -175,7 +201,8 @@ impl OutputTask {
                 part += 1;
                 shared.note_error(tr!("{}. Suite dans la partie {}", note, part));
             } else if quick_failures >= MAX_QUICK_FAILURES {
-                shared.fail(tr!("l'encodeur s'arrête dès son démarrage : {}", reason));
+                log::warn!("[{}] l'encodeur s'arrête dès son démarrage : {reason}", plan.title);
+                shared.fail(tr!("l'encodeur s'arrête dès son démarrage : {}", shown));
                 return;
             } else {
                 part += 1;
@@ -357,12 +384,12 @@ impl Part {
                     // Les tubes ne passent plus : l'encodeur est hors service.
                     let _ = self.child.kill();
                     let status = self.child.wait().map(|s| s.to_string()).unwrap_or_default();
-                    return PartEnd::Crashed(tr!("l'encodeur s'est arrêté ({}) : {}", status, log_tail(log)));
+                    return PartEnd::Crashed(Crash::stopped(status, log));
                 }
                 // Flux fermés : FFmpeg termine le fichier.
                 return match wait_exit(&mut self.child, FINALIZE_TIMEOUT) {
                     Some(status) if !status.success() && !stopping(shared) => {
-                        PartEnd::Crashed(tr!("l'encodeur s'est arrêté ({}) : {}", status, log_tail(log)))
+                        PartEnd::Crashed(Crash::stopped(status, log))
                     }
                     _ => PartEnd::Closed,
                 };
@@ -371,12 +398,12 @@ impl Part {
                 // FFmpeg parti (planté, ou arrêté parce que figé) : les fils
                 // d'écriture sont débloqués et la partie est abandonnée.
                 self.abandon_writers();
-                let reason = if stalled {
-                    tr!("l'encodeur ne répondait plus")
+                let crash = if stalled {
+                    Crash::plain(tr!("l'encodeur ne répondait plus"))
                 } else {
-                    tr!("l'encodeur s'est arrêté ({}) : {}", status, log_tail(log))
+                    Crash::stopped(status, log)
                 };
-                return if stopping(shared) && !stalled { PartEnd::Closed } else { PartEnd::Crashed(reason) };
+                return if stopping(shared) && !stalled { PartEnd::Closed } else { PartEnd::Crashed(crash) };
             }
             if self.control.broken.load(Ordering::SeqCst) && !stalled {
                 // Un tube ne passe plus alors que FFmpeg tourne encore.
@@ -502,7 +529,7 @@ pub(crate) fn log_tail(path: &Path) -> String {
     let tail = lines[lines.len().saturating_sub(3)..].join(" | ");
     let mut tail: String = tail.chars().take(400).collect();
     if tail.is_empty() {
-        tail = tr!("journal vide");
+        tail = "journal vide".into();
     }
     tail
 }

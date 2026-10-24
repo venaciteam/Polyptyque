@@ -3723,6 +3723,7 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "directories",
+ "log",
  "serde",
  "toml",
  "tr",

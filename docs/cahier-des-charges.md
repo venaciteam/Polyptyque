@@ -37,9 +37,10 @@ type: projet
 	10. [[#Réglages d'encodage]]
 	11. [[#Interface]]
 	12. [[#Langues et formats]]
-	13. [[#Raccourcis clavier]]
-	14. [[#Préparation de la diffusion en direct]]
-	15. [[#Installation]]
+	13. [[#Signalement d'un problème]]
+	14. [[#Raccourcis clavier]]
+	15. [[#Préparation de la diffusion en direct]]
+	16. [[#Installation]]
 5. [[#Exigences non fonctionnelles]]
 	1. [[#Fiabilité]]
 	2. [[#Performance]]
@@ -442,6 +443,7 @@ Inspirée d'[[OBS Studio]], volontairement allégée, thème sombre.
 **Hors traduction**
 
 - **Journaux** : en français, non traduits (diagnostic : une seule langue reste cherchable).
+- **Détails techniques venus d'autres logiciels** (messages de FFmpeg, de Velopack, du lecteur de réglages…) : jamais affichés, puisqu'ils sont en anglais quelle que soit la langue ; le message affiché, dans la langue de l'interface, se termine par « (détail dans le journal) », et le détail est écrit au journal. Les messages d'erreur de Windows lui-même, dans la langue du système, restent affichés.
 - **Dossiers sur disque** (`données` de la version portable, `profils`, `journaux`) et clés du fichier de réglages : jamais renommés, sinon les installations existantes perdraient leurs données.
 - **Version console** (`polyptyque-console.exe`) : française pour l'instant ; elle sera traduite (ou remplacée) lors du chantier du pilotage par un modèle de langage, qui définit un mode commande non interactif.
 - Documents de travail (`docs/`) : en français. Le README existe dans les deux langues, l'anglais en tête.
@@ -453,6 +455,26 @@ Inspirée d'[[OBS Studio]], volontairement allégée, thème sombre.
 - Slint retombe sur la langue source quand la langue du système n'a pas de catalogue : c'est Polyptyque qui choisit la langue au démarrage (sinon un Windows allemand afficherait du français).
 - **Test de complétude** (`cargo test`) : il échoue si un texte n'a pas sa version anglaise. La fabrication de GitHub ne lance aucun test : il est lancé en local avant chaque publication.
 - Phrases toujours complètes et pluriels gérés par la traduction : jamais de phrase recollée à partir de morceaux, ni de « fichier(s) ».
+
+### Signalement d'un problème
+
+Rendre facile la transmission d'un problème sur GitHub, sans exposer de données personnelles.
+
+- **Accès** : bouton « Signaler un problème… » dans les réglages, à côté du numéro de version ; bouton « Signaler ce problème » dans la fenêtre « Enregistrement interrompu ». Pas dans la barre du haut (réservée à l'état en direct).
+- **Fenêtre de signalement** : ce que contient le rapport, et l'avertissement qu'une issue GitHub est **publique** (noms des scènes et des sources visibles ; compte GitHub nécessaire).
+- **« Préparer le signalement »** :
+	1. écrit `rapport_<date>_<heure>.txt` dans le dossier des journaux (effacé avec eux après 30 jours) ;
+	2. ouvre l'Explorateur, le fichier sélectionné ;
+	3. ouvre la page « nouvelle issue » du dépôt, avec le formulaire de la langue de l'interface, pré-rempli (version, Windows, carte graphique).
+
+	Il reste à décrire le problème et à glisser le fichier dans la page. Le rapport peut être ouvert pour le relire avant.
+- **Contenu du rapport** (en français, comme les journaux) : version (installée ou portable), Windows, langue, cartes graphiques, résumé des réglages sans aucun chemin, journaux des trois derniers lancements (un plantage se lit dans le précédent), fin des journaux FFmpeg du dernier enregistrement. Taille plafonnée.
+- **Masquage** : le dossier personnel est remplacé par `%USERPROFILE%`, et le nom du compte Windows retiré des chemins. Les titres des fenêtres ne sont jamais écrits dans les journaux.
+- Polyptyque n'envoie rien lui-même : la personne joint le fichier. Pas de nouveau flux réseau.
+- **Côté GitHub** : deux formulaires d'issue (`.github/ISSUE_TEMPLATE/`), anglais et français, étiquette `bug` posée par le formulaire (le paramètre `labels` de l'adresse exige des droits que les visiteurs n'ont pas). Les champs se pré-remplissent par leur identifiant dans l'adresse ; les modèles ne sont lus que sur la branche par défaut (`main`).
+
+> [!info] Plus tard, peut-être
+> Recevoir les rapports sans compte GitHub (par [[Sema]]) : envoi de données vers un serveur, donc consentement, durée de conservation et protection contre les abus à traiter à part.
 
 ### Raccourcis clavier
 
@@ -713,12 +735,19 @@ Seule une implémentation de `Platform` est à écrire pour chaque système (`po
 > - [ ] Validation sur la machine de référence
 
 > [!todo] Étape 3 quinquies - Version anglaise ([[#Langues et formats]]), écrite le 2026-10-24
-> - [ ] Textes externalisés (interface et messages Rust, erreurs du moteur comprises), phrases recollées et pluriels réécrits, copy française au ton impersonnel
+> - [x] Textes externalisés (interface et messages Rust, erreurs du moteur comprises), phrases recollées et pluriels réécrits, copy française au ton impersonnel
 > - [ ] Lexique anglais de référence, validé avant de traduire
 > - [ ] Catalogue anglais complet, écrit directement en anglais et relu sur captures du mode démonstration
 > - [ ] Réglages « Langue » et « Horloge », appliqués immédiatement ; sélecteur de date dans la programmation
 > - [ ] README anglais en tête (`README.md`) et français (`README.fr.md`), fichier d'accompagnement de la version portable, description de l'exécutable et du dépôt GitHub
 > - [ ] Validation sur la machine de référence, en français et en anglais
+
+> [!todo] Étape 3 sexies - Signalement d'un problème ([[#Signalement d'un problème]]), écrite le 2026-10-24
+> - [x] Détails d'erreur d'autres logiciels renvoyés au journal
+> - [x] Rapport masqué, fenêtre de signalement, boutons des réglages et du bilan d'incident (vérifié en mode démonstration)
+> - [x] Formulaires d'issue anglais et français (`bug-report.yml`, `signalement.yml`)
+> - [ ] Pré-remplissage de la page vérifié, une fois les formulaires sur `main`
+> - [ ] Validation sur la machine de référence
 
 > [!todo] Étape 4 - Publication
 > - [ ] Dépôt public, première version publiée
@@ -801,6 +830,8 @@ Seule une implémentation de `Platform` est à écrire pour chaque système (`po
 | 2026-10-24 | Textes externalisés en gettext (`.po`), français comme texte source : `@tr` de Slint et crate `tr` côté Rust, catalogues intégrés à l'exécutable ; test de complétude lancé en local avant chaque publication. Journaux non traduits. Console traduite lors du chantier du pilotage par un modèle de langage |
 | 2026-10-24 | Formats : réglage « Horloge » (automatique comme Windows par défaut, 24 h ou 12 h) ; dates de l'interface écrites avec le nom du mois, saisie par sélecteur de date ; semaine commençant le lundi ; noms de fichiers en date ISO et heure 24 h dans les deux langues (`14h32` / `14-32`) |
 | 2026-10-24 | Copy française au ton impersonnel (fin du tutoiement, laissé passer jusqu'à la bêta 4) : pas de « tu », pas de genre, vouvoiement seulement si nécessaire |
+| 2026-10-24 | Détails d'erreur venus d'autres logiciels (FFmpeg, Velopack…) jamais affichés : message dans la langue de l'interface, « (détail dans le journal) » |
+| 2026-10-24 | Signalement d'un problème : bouton dans les réglages et dans le bilan d'incident ; rapport texte masqué (dossier personnel, nom du compte) dans le dossier des journaux, page « nouvelle issue » pré-remplie, deux formulaires GitHub (anglais, français). Rien n'est envoyé par Polyptyque |
 
 ---
 

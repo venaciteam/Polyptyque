@@ -247,6 +247,13 @@ export component IncidentSheet inherits Sheet {
     }
     Footer {
         ActionButton {
+            text: @tr("Signaler ce problème");
+            kind: "ghost";
+            clicked => {
+                Bridge.request-report(true);
+            }
+        }
+        ActionButton {
             text: @tr("Fermer");
             kind: "ghost";
             clicked => {
@@ -264,6 +271,84 @@ export component IncidentSheet inherits Sheet {
             kind: "primary";
             clicked => {
                 Bridge.incident-resume();
+            }
+        }
+    }
+}
+
+// Signalement d'un problème : rapport à joindre à une issue GitHub.
+export component ReportSheet inherits Sheet {
+    title: @tr("Signaler un problème");
+    sheet-width: 560px;
+    close => {
+        Bridge.close-sheet();
+    }
+
+    // Avant : ce que contient le rapport ; après : comment le joindre.
+    property <bool> ready: Bridge.report-path != "";
+    if !root.ready: Text {
+        text: @tr("Polyptyque prépare un rapport à joindre au signalement, sur GitHub. Il contient :");
+        color: Theme.text-muted;
+        wrap: word-wrap;
+    }
+    if !root.ready: Text {
+        text: @tr("• les versions de Polyptyque et de Windows, et la carte graphique ;\n• les réglages d'enregistrement, sans aucun chemin de dossier ;\n• les journaux des trois derniers lancements et du dernier enregistrement.");
+        color: Theme.text-muted;
+        wrap: word-wrap;
+    }
+    if !root.ready: Note {
+        tone: 2;
+        text: @tr("Un signalement sur GitHub est public et demande un compte GitHub. Le dossier personnel et le nom du compte Windows sont masqués ; les noms des scènes et des sources restent visibles. Le rapport peut être relu avant d'être joint.");
+    }
+    if root.ready: Text {
+        text: @tr("Rapport prêt. Pour terminer :");
+        color: Theme.text;
+        wrap: word-wrap;
+    }
+    if root.ready: Text {
+        text: @tr("1. Décrire le problème dans la page GitHub qui vient de s'ouvrir.\n2. Glisser le fichier du rapport, sélectionné dans l'Explorateur, dans le champ « Rapport » de la page.");
+        color: Theme.text-muted;
+        wrap: word-wrap;
+    }
+    if root.ready: Text {
+        text: Bridge.report-name;
+        color: Theme.text-faint;
+        font-size: Theme.font-small;
+        wrap: word-wrap;
+    }
+    Footer {
+        if !root.ready: ActionButton {
+            text: @tr("Annuler");
+            kind: "ghost";
+            clicked => {
+                Bridge.close-sheet();
+            }
+        }
+        if !root.ready: ActionButton {
+            text: @tr("Préparer le signalement");
+            kind: "primary";
+            clicked => {
+                Bridge.prepare-report();
+            }
+        }
+        if root.ready: ActionButton {
+            text: @tr("Relire le rapport");
+            kind: "ghost";
+            clicked => {
+                Bridge.open-report();
+            }
+        }
+        if root.ready: ActionButton {
+            text: @tr("Rouvrir la page GitHub");
+            clicked => {
+                Bridge.open-report-page();
+            }
+        }
+        if root.ready: ActionButton {
+            text: @tr("Fermer");
+            kind: "primary";
+            clicked => {
+                Bridge.close-sheet();
             }
         }
     }
@@ -489,11 +574,23 @@ export component SettingsSheet inherits Sheet {
         text: Bridge.settings-error;
     }
     HorizontalLayout {
+        spacing: 10px;
         Text {
             text: "Polyptyque \{Bridge.version}";
             color: Theme.text-faint;
             font-size: Theme.font-small;
             vertical-alignment: center;
+        }
+        VerticalLayout {
+            alignment: center;
+            padding-top: 6px;
+            ActionButton {
+                text: @tr("Signaler un problème…");
+                kind: "ghost";
+                clicked => {
+                    Bridge.request-report(false);
+                }
+            }
         }
         Footer {
             ActionButton {
